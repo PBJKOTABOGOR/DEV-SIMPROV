@@ -2488,11 +2488,6 @@ tr:has(.per-file-revision) td{
 .inline-non-complete-v93{margin:14px 12px 4px;padding:12px;border-radius:12px;background:#ebfff1;border:1px solid #bdebc9;color:#16743a;font-weight:700}
 @media(max-width:760px){.inline-non-row-v93{grid-template-columns:1fr}.inline-non-title-v93{align-items:flex-start;flex-direction:column}}
 
-/* SIMPROV v94 - tambahan inti berbasis SK */
-.v94-planning-reference,.v94-form-card{border:1px solid #dbe7f2;background:#f9fcff;border-radius:16px;padding:16px;margin-bottom:18px}
-.v94-section-title,.v94-form-card h4{font-size:16px;font-weight:800;color:#0b4a7e;margin:0 0 12px}
-.v94-process-flow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px;border-radius:14px;background:#eef7ff;margin-bottom:18px}
-.v94-process-flow span{background:#fff;border:1px solid #cfe1f1;border-radius:999px;padding:8px 12px;font-weight:800;color:#0b4a7e}
-.v94-process-flow b{color:#5b7893}
-#stdTableV94 th,#stdTableV94 td{white-space:normal;vertical-align:top}
-@media(max-width:760px){.v94-process-flow b{display:none}.v94-process-flow span{width:100%}}
+/* SIMPROV v96 - hanya style fitur Penyedia & Realisasi */
+.process-grid-v96{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:16px 0}.process-grid-v96 .field{margin:0}.process-grid-v96 textarea{min-height:96px;resize:vertical}.span-2-v96{grid-column:span 2}.template-panel-v96{margin-top:18px;padding:16px;border:1px solid #dbe8f3;border-radius:16px;background:#f8fbfe}.template-buttons-v96{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.generated-list-v96{display:flex;flex-wrap:wrap;gap:10px}.generated-list-v96 a{padding:8px 11px;border-radius:10px;background:#e8f4ff;color:#075b91;font-weight:700;text-decoration:none}
+@media(max-width:900px){.process-grid-v96{grid-template-columns:1fr 1fr}.span-2-v96{grid-column:span 2}}@media(max-width:640px){.process-grid-v96{grid-template-columns:1fr}.span-2-v96{grid-column:span 1}.template-buttons-v96{flex-direction:column}.template-buttons-v96 button{width:100%}}
