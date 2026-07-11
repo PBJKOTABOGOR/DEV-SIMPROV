@@ -1,0 +1,5690 @@
+const API_URL = "https://script.google.com/macros/s/AKfycbzRwep7u22YZ6SX31Sx5xouE0057yWNlgMTwE_c9gsYObSV1uC9CRl-0tUROVu_B5FW/exec";
+
+let currentUser = null;
+let dashboard = null;
+let activeMenu = "Struktur Anggaran";
+let perPage = 10;
+let perencanaanPage = 1;
+let pencairanPage = 1;
+let filters = {
+  rencanaBidang: "ALL", rencanaStatus: "ALL", rencanaSearch: "",
+  cairBidang: "ALL", cairStatus: "ALL", cairSearch: ""
+};
+let VerifikatorEditRows = {};
+let collapseState = { perencanaanInput: false, uploadPencairan: false };
+let docGroupCollapse = {};
+
+const MENUS_USER = ["Struktur Anggaran", "Perencanaan", "Pencairan", "Laporan"];
+const MENUS_ADMIN = ["Dashboard Monitoring", "Struktur Anggaran", "Perencanaan", "Pencairan"];
+const MENUS_REVIEWER = ["Dashboard Monitoring", "Struktur Anggaran", "Perencanaan", "Pencairan"];
+const REVIEWER_ROLES = ["SEKDA", "AUDITOR"];
+
+function roleCode(){ return String(currentUser?.id_bidang || "").toUpperCase(); }
+function isAdmin(){ return roleCode() === "ADMIN"; }
+function isReviewer(){ return REVIEWER_ROLES.includes(roleCode()); }
+function canSeeAll(){ return isAdmin() || isReviewer(); }
+function canManage(){ return isAdmin(); }
+function roleLabel(){
+  if(isAdmin()) return "ADMIN";
+  if(isReviewer()) return roleCode();
+  return "BIDANG";
+}
+function toNumber(v){
+  if(v === null || v === undefined || v === "") return 0;
+  if(typeof v === "number") return isFinite(v) ? v : 0;
+  let s = String(v).trim().replace(/[^0-9,.-]/g, "");
+  if(!s) return 0;
+  if((s.match(/\./g) || []).length > 1 && !s.includes(",")) s = s.replace(/\./g, "");
+  else if(s.includes(".") && s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");
+  else if(s.includes(",") && !s.includes(".")) s = s.replace(",", ".");
+  else if(/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, "");
+  const num = Number(s);
+  return isFinite(num) ? num : 0;
+}
+function formatTanggalID(v){
+  if(!v) return "-";
+  const s = String(v).trim();
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(s+"T00:00:00+07:00") : new Date(s);
+  if(!isNaN(d.getTime())) return d.toLocaleDateString("id-ID", {day:"2-digit", month:"long", year:"numeric", timeZone:"Asia/Jakarta"});
+  return s;
+}
+function rupiah(n){ return new Intl.NumberFormat("id-ID",{style:"currency",currency:"IDR",maximumFractionDigits:0}).format(toNumber(n)); }
+function angkaID(n){ return new Intl.NumberFormat("id-ID", {maximumFractionDigits:0}).format(toNumber(n)); }
+function formatAngkaInput(el){ const raw = String(el.value || "").replace(/[^0-9]/g, ""); el.value = raw ? angkaID(raw) : ""; }
+function setAutoTotal(volumeId="volume", hargaId="harga", totalId="totalPreview"){
+  const total = toNumber(document.getElementById(volumeId)?.value) * toNumber(document.getElementById(hargaId)?.value);
+  const el = document.getElementById(totalId);
+  if(el) el.value = rupiah(total);
+  const isEdit = totalId !== "totalPreview";
+  const metodeEl = document.getElementById(isEdit ? "editMetodePemilihan" : "metodePemilihan");
+  if(metodeEl) metodeEl.value = total > 0 ? metodePemilihanByNilai(total) : "";
+  const waktuEl = document.getElementById(isEdit ? "editWaktuPemilihan" : "waktuPemilihan");
+  const preview = document.getElementById(isEdit ? "editMetodePreview" : "metodePreview");
+  if(preview) preview.innerHTML = total > 0 ? ketentuanPemilihanHtml(total, waktuEl?.value || "") : "";
+}
+function onAngkaInput(el, volumeId="volume", hargaId="harga", totalId="totalPreview"){ formatAngkaInput(el); setAutoTotal(volumeId, hargaId, totalId); }
+function onWaktuPemilihanInput(isEdit=false){ setAutoTotal(isEdit ? "editVolume" : "volume", isEdit ? "editHarga" : "harga", isEdit ? "editTotalPreview" : "totalPreview"); }
+function esc(v){ return String(v ?? "").replace(/[&<>'"]/g, s => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"}[s])); }
+
+const JENIS_DOKUMEN_SOP = [
+  "Bukti Pembelian / Kwitansi",
+  "Faktur Pembelian",
+  "Surat Perintah Kerja",
+  "Surat Perjanjian / Kontrak",
+  "Berita Acara",
+  "SPTJM",
+  "Surat Permohonan Pembayaran",
+  "Nota Dinas Pencairan",
+  "Surat Perintah Pembayaran",
+  "Dokumen Pendukung Lainnya"
+];
+
+function metodePemilihanByNilai(jumlah){
+  const nilai = toNumber(jumlah);
+  if(nilai <= 500000000) return "Belanja Langsung";
+  if(nilai <= 1000000000) return "Pengadaan Langsung";
+  return "Tender Manual";
+}
+function dokumenKetentuanByMetode(metode){
+  const m = String(metode || "").toUpperCase();
+  if(m === "BELANJA LANGSUNG") return ["Bukti Pembelian / Kwitansi", "Faktur Pembelian", "SPTJM", "Surat Permohonan Pembayaran", "Nota Dinas Pencairan", "Surat Perintah Pembayaran"];
+  if(m === "PENGADAAN LANGSUNG") return ["Surat Perintah Kerja", "Berita Acara", "Bukti Pembelian / Kwitansi", "Faktur Pembelian", "SPTJM", "Surat Permohonan Pembayaran", "Nota Dinas Pencairan", "Surat Perintah Pembayaran"];
+  if(m === "TENDER MANUAL") return ["Surat Perjanjian / Kontrak", "Surat Perintah Kerja", "Berita Acara", "Bukti Pembelian / Kwitansi", "Faktur Pembelian"];
+  return JENIS_DOKUMEN_SOP;
+}
+function dokumenKetentuanByNilai(jumlah){ return dokumenKetentuanByMetode(metodePemilihanByNilai(jumlah)); }
+function waktuPemilihanByNilai(jumlah){
+  return "-";
+}
+function ketentuanPemilihanHtml(jumlah, waktuManual=""){
+  const metode = metodePemilihanByNilai(jumlah);
+  const docs = dokumenKetentuanByMetode(metode);
+  return `<div class="metode-box shine-once">
+    <div><span>Metode Otomatis</span><b>${esc(metode)}</b></div>
+    <div><span>Waktu Pemilihan</span><b>${esc(waktuManual ? formatTanggalID(waktuManual) : "Diisi manual oleh user")}</b></div>
+    <p><b>Dokumen pencairan yang perlu disiapkan:</b> ${docs.map(esc).join(", ")}.</p>
+  </div>`;
+}
+
+
+function formatTanggalJam(v){
+  if(!v) return "-";
+  const raw = String(v);
+  const d = new Date(raw);
+  if(!isNaN(d.getTime())){
+    return d.toLocaleDateString("id-ID", {day:"2-digit", month:"long", year:"numeric", timeZone:"Asia/Jakarta"}) + " pukul " +
+           d.toLocaleTimeString("id-ID", {hour:"2-digit", minute:"2-digit", timeZone:"Asia/Jakarta"}) + " WIB";
+  }
+  return raw.replace("T"," ").replace("Z","");
+}
+
+function normalizeJenisDokumenLabel(v){
+  const t = String(v || "").trim();
+  const u = t.toUpperCase();
+  if(u === "BERITA ACARA NEGOSIASI TEKNIS DAN HARGA" || u === "BERITA ACARA PENETAPAN PENYEDIA") return "Berita Acara";
+  return t;
+}
+
+function docOptionsHtml(selected="", idKegiatan=""){
+  const k = kegiatanById(idKegiatan);
+  const list = k ? dokumenKetentuanByNilai(k.jumlah) : JENIS_DOKUMEN_SOP;
+  return list.map(x => `<option value="${esc(x)}" ${x===selected?'selected':''}>${esc(x)}</option>`).join("");
+}
+function kegiatanById(id){
+  return (dashboard?.perencanaan || []).find(k => String(k.id_kegiatan) === String(id)) || null;
+}
+function wajibDocNote(idKegiatan){
+  const k = kegiatanById(idKegiatan);
+  if(!k) return "";
+  return ketentuanPemilihanHtml(k.jumlah);
+}
+function updateSaranDokumen(){
+  const id = document.getElementById("dokKegiatan")?.value;
+  const box = document.getElementById("saranDokumen");
+  if(box) box.innerHTML = wajibDocNote(id);
+  document.querySelectorAll("#uploadRows .jenisDok").forEach(sel => {
+    sel.innerHTML = docOptionsHtml(sel.value, id);
+  });
+}
+
+function statusDihitungPagu(status){
+  return String(status || '').toUpperCase() !== 'PERLU PERBAIKAN';
+}
+function rekapBidangAktif(){
+  if(canSeeAll()) return null;
+  return (dashboard?.rekap || []).find(r => String(r.id_bidang) === String(currentUser?.id_bidang)) || null;
+}
+function totalAktifBidang(excludeId){
+  if(!dashboard?.perencanaan) return 0;
+  const ex = String(excludeId || '');
+  return dashboard.perencanaan
+    .filter(k => String(k.id_bidang) === String(currentUser?.id_bidang))
+    .filter(k => !ex || String(k.id_kegiatan) !== ex)
+    .filter(k => statusDihitungPagu(k.status_perencanaan))
+    .reduce((s,k) => s + toNumber(k.jumlah), 0);
+}
+function cekPaguFrontend(jumlahBaru, excludeId){
+  const rekap = rekapBidangAktif();
+  if(!rekap) return {ok:true};
+  const pagu = toNumber(rekap.pagu);
+  const totalLain = totalAktifBidang(excludeId);
+  const sisa = pagu - totalLain;
+  const jumlah = toNumber(jumlahBaru);
+  if(jumlah > sisa){
+    return {ok:false, message:`Gagal menyimpan. Total perencanaan melebihi pagu bidang.\n\nSisa pagu saat ini: ${rupiah(sisa)}\nNilai yang diajukan: ${rupiah(jumlah)}\n\nSilakan kurangi volume/harga satuan atau minta Verifikator menyesuaikan pagu.`};
+  }
+  return {ok:true};
+}
+
+function showLoading(text="Memproses..."){ document.getElementById("loadingText").innerText = text; document.getElementById("loadingOverlay").classList.remove("hidden"); }
+function hideLoading(){ document.getElementById("loadingOverlay").classList.add("hidden"); }
+
+function displayStatusText(v){
+  const t = String(v || "").toUpperCase();
+  if(t === "DITOLAK") return "PERLU PERBAIKAN";
+  if(t === "ADA YANG DITOLAK") return "PERLU PENYESUAIAN";
+  return v || "-";
+}
+
+function badge(text){
+  const t = String(text || "-").toUpperCase();
+  const label = displayStatusText(t);
+  let cls = "badge-gray";
+  if(["DISETUJUI","VALID","DOKUMEN LENGKAP","SIAP DICAIRKAN","SUDAH DICAIRKAN","BUKA","AMAN"].includes(t)) cls = "badge-green";
+  if(["DIAJUKAN","MENUNGGU","MENUNGGU VERIFIKASI","PERUBAHAN_DIAJUKAN"].includes(t)) cls = "badge-blue";
+  if(["DITOLAK","PERLU PERBAIKAN","PERBAIKAN","TUTUP","MELEBIHI PAGU"].includes(t)) cls = "badge-red";
+  if(["ADA YANG DITOLAK","BELUM ADA DOKUMEN","BELUM INPUT","PERLU DIPERIKSA","PERLU PENYESUAIAN"].includes(t)) cls = "badge-orange";
+  return `<span class="badge ${cls}">${esc(label)}</span>`;
+}
+async function apiPost(payload){
+  const readOnlyActions = new Set(["login","getDashboard","forceDriveAuth"]);
+  const isReadOnly = readOnlyActions.has(payload?.action);
+  const maxTry = isReadOnly ? 2 : 1;
+  let lastErr = null;
+
+  for(let attempt=1; attempt<=maxTry; attempt++){
+    const controller = new AbortController();
+    const timeoutMs = isReadOnly ? 18000 : 45000;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try{
+      const res = await fetch(API_URL, {
+        method:"POST",
+        body: JSON.stringify(payload || {}),
+        signal: controller.signal
+      });
+      const txt = await res.text();
+      if(!res.ok){
+        throw new Error(`API HTTP ${res.status}: ${String(txt || "").slice(0, 240)}`);
+      }
+      try{
+        return JSON.parse(txt);
+      }catch(e){
+        if(String(txt || "").startsWith("<!DOCTYPE html>")){
+          throw new Error("URL Web App tidak mengembalikan JSON. Cek Deploy Apps Script: Execute as Me, Who has access Anyone, lalu pastikan URL /exec sudah benar.");
+        }
+        throw new Error(String(txt || "Response bukan JSON").slice(0, 300));
+      }
+    }catch(err){
+      lastErr = err;
+      if(err.name === "AbortError") lastErr = new Error("API terlalu lama merespons. Coba ulangi, atau cek deploy Apps Script.");
+      if(attempt < maxTry){
+        await new Promise(resolve => setTimeout(resolve, 650 * attempt));
+      }
+    }finally{
+      clearTimeout(timer);
+    }
+  }
+  throw lastErr || new Error("Gagal konek ke server/API.");
+}
+async function login(){
+  const username = document.getElementById("username").value.trim();
+  const password = document.getElementById("password").value.trim();
+  const msg = document.getElementById("loginMsg");
+  if(!username || !password){ msg.innerText = "Username dan password wajib diisi."; return; }
+  showLoading("Login...");
+  try{
+    const r = await apiPost({action:"login", username, password});
+    if(!r.success){ msg.innerText = r.message; return; }
+    currentUser = r.user;
+    localStorage.setItem("siporbo_user", JSON.stringify(currentUser));
+    activeMenu = canSeeAll() ? "Dashboard Monitoring" : "Struktur Anggaran";
+    document.getElementById("loginPage").classList.add("hidden");
+    document.getElementById("appPage").classList.remove("hidden");
+    await loadDashboard(false);
+  }catch(err){ msg.innerText = "Gagal konek ke server/API: " + (err.message || err); console.error(err); }
+  finally{ hideLoading(); }
+}
+
+function normalizeDashboardData(r){
+  r = r || {};
+  r.bidangs = Array.isArray(r.bidangs) ? r.bidangs : [];
+  r.perencanaan = Array.isArray(r.perencanaan) ? r.perencanaan : [];
+  r.pencairan = Array.isArray(r.pencairan) ? r.pencairan : [];
+  r.dokumen = Array.isArray(r.dokumen) ? r.dokumen : [];
+  r.rekap = Array.isArray(r.rekap) ? r.rekap : [];
+  r.bidangMap = r.bidangMap || {};
+  r.perencanaan = r.perencanaan.map(k => {
+    const jumlah = toNumber(k.jumlah || (toNumber(k.volume) * toNumber(k.harga_satuan)));
+    return {
+      ...k,
+      jumlah,
+      metode_pemilihan: k.metode_pemilihan || metodePemilihanByNilai(jumlah),
+      waktu_pemilihan: k.waktu_pemilihan || ""
+    };
+  });
+  return r;
+}
+
+
+function cacheKeyDashboard(){
+  const u = currentUser || {};
+  return `SIMPROV_DASHBOARD_CACHE_V45_${u.id_user || u.username || u.id_bidang || "guest"}`;
+}
+function readDashboardCache(){
+  try{
+    const raw = localStorage.getItem(cacheKeyDashboard());
+    if(!raw) return null;
+    const obj = JSON.parse(raw);
+    if(!obj || !obj.data) return null;
+    return obj;
+  }catch(e){ return null; }
+}
+function writeDashboardCache(data){
+  try{
+    localStorage.setItem(cacheKeyDashboard(), JSON.stringify({savedAt:Date.now(), data}));
+  }catch(e){
+    // localStorage bisa penuh kalau dokumen banyak. Tidak fatal.
+    console.warn("CACHE_WRITE_FAILED", e);
+  }
+}
+function dashboardCacheAgeText(savedAt){
+  if(!savedAt) return "";
+  const sec = Math.max(0, Math.round((Date.now() - savedAt)/1000));
+  if(sec < 60) return `${sec} detik lalu`;
+  const min = Math.round(sec/60);
+  if(min < 60) return `${min} menit lalu`;
+  return `${Math.round(min/60)} jam lalu`;
+}
+function showFastCacheNotice(text){
+  const el = document.getElementById("cacheNotice");
+  if(el) el.remove();
+  const div = document.createElement("div");
+  div.id = "cacheNotice";
+  div.className = "cache-notice";
+  div.innerText = text;
+  document.body.appendChild(div);
+  setTimeout(()=>{ try{ div.remove(); }catch(e){} }, 3500);
+}
+
+async function loadDashboard(withLoader=true){
+  const cached = readDashboardCache();
+  let renderedCache = false;
+
+  // Mode super cepat: tampilkan data cache dulu dalam hitungan milidetik.
+  if(cached && cached.data){
+    try{
+      dashboard = normalizeDashboardData(cached.data);
+      document.getElementById("userInfo").innerText = `${currentUser.nama || "-"} - ${currentUser.nama_bidang || currentUser.id_bidang || "-"}`;
+      renderAll();
+      renderedCache = true;
+      showFastCacheNotice(`Data sedang diperbarui. Tampilan terakhir berhasil dimuat (${dashboardCacheAgeText(cached.savedAt)}).`);
+    }catch(e){
+      console.warn("CACHE_RENDER_FAILED", e);
+    }
+  }
+
+  if(withLoader && !renderedCache) showLoading("Memuat data...");
+  try{
+    const r = await apiPost({action:"getDashboard", user: currentUser});
+    if(!r.success){ 
+      if(!renderedCache) alert(r.message || "Gagal memuat dashboard.");
+      else showFastCacheNotice("Data terakhir berhasil dimuat. Sinkronisasi terbaru belum berhasil.");
+      return; 
+    }
+    dashboard = normalizeDashboardData(r);
+    writeDashboardCache(dashboard);
+    document.getElementById("userInfo").innerText = `${currentUser.nama || "-"} - ${currentUser.nama_bidang || currentUser.id_bidang || "-"}`;
+    try{
+      renderAll();
+      if(renderedCache) showFastCacheNotice("Data terbaru berhasil diperbarui.");
+    }catch(renderErr){
+      console.error("RENDER_DASHBOARD_ERROR:", renderErr);
+      activeMenu = canSeeAll() ? "Dashboard Monitoring" : "Struktur Anggaran";
+      renderMenu();
+      renderSummary();
+      document.getElementById("contentArea").innerHTML = `<section class="panel"><h3>Data berhasil dimuat</h3><p class="panel-sub">Tampilan menu sebelumnya gagal dirender. Silakan klik Refresh atau pindah menu. Detail teknis: ${esc(renderErr.message || renderErr)}</p></section>`;
+    }
+  }catch(err){ 
+    console.error("LOAD_DASHBOARD_ERROR:", err); 
+    if(!renderedCache) alert("Gagal memuat dashboard. Detail: " + String(err.message || err).slice(0, 240)); 
+    else showFastCacheNotice("Data terakhir berhasil dimuat. Sinkronisasi terbaru belum berhasil.");
+  }
+  finally{ if(withLoader && !renderedCache) hideLoading(); }
+}
+async function refreshData(){ 
+  // Refresh manual tetap paksa ambil data terbaru.
+  showLoading("Sinkronisasi data terbaru...");
+  try{
+    const r = await apiPost({action:"getDashboard", user: currentUser});
+    if(!r.success){ alert(r.message || "Gagal memuat dashboard."); return; }
+    dashboard = normalizeDashboardData(r);
+    writeDashboardCache(dashboard);
+    renderAll();
+    showFastCacheNotice("Data berhasil diperbarui.");
+  }catch(err){
+    alert("Gagal refresh data. Detail: " + String(err.message || err).slice(0,240));
+  }finally{
+    hideLoading();
+  }
+}
+function renderAll(){ renderMenu(); renderSummary(); renderContent(); }
+function setMenu(m){ activeMenu=m; perencanaanPage=1; pencairanPage=1; renderAll(); }
+function renderMenu(){
+  const menus = isAdmin() ? MENUS_ADMIN : (isReviewer() ? MENUS_REVIEWER : MENUS_USER);
+  document.getElementById("menuNav").innerHTML = menus.map(m => `<button class="${activeMenu===m?'active':''}" onclick="setMenu('${m}')">${m}</button>`).join("");
+}
+function card(a,b){ return `<div class="summary-card"><span>${esc(a)}</span><b>${esc(b)}</b></div>`; }
+function renderSummary(){
+  const wrap = document.getElementById("summaryCards"); if(!dashboard){ wrap.innerHTML=""; return; }
+  if(canSeeAll()){
+    const pagu = dashboard.rekap.reduce((s,r)=>s+toNumber(r.pagu),0);
+    const total = dashboard.rekap.reduce((s,r)=>s+toNumber(r.total_perencanaan),0);
+    const dok = dashboard.dokumen.length;
+    const valid = dashboard.dokumen.filter(d => isDocValidKeuanganV70(d)).length;
+    wrap.innerHTML = card("Total Pagu", rupiah(pagu))+card("Total Perencanaan", rupiah(total))+card("Sisa Pagu", rupiah(pagu-total))+card("Dokumen Valid", `${valid}/${dok}`);
+  } else {
+    const r = dashboard.rekap.find(x => String(x.id_bidang)===String(currentUser.id_bidang)) || {};
+    wrap.innerHTML = card("Pagu Bidang", rupiah(r.pagu))+card("Total Perencanaan", rupiah(r.total_perencanaan))+card("Sisa Pagu", rupiah(r.sisa_pagu))+card("Status Akses", r.status_akses || "-");
+  }
+}
+function renderContent(){
+  if(activeMenu==="Dashboard Monitoring") return renderMonitoring();
+  if(activeMenu==="Struktur Anggaran") return renderStruktur();
+  if(activeMenu==="Perencanaan") return renderPerencanaan();
+  if(activeMenu==="Pencairan") return renderPencairan();
+  if(activeMenu==="Laporan") return renderLaporanUser();
+}
+
+function renderLaporanUser(){
+  const r = dashboard.rekap.find(x=>String(x.id_bidang)===String(currentUser.id_bidang)) || {};
+  const totalKegiatan = (dashboard.perencanaan || []).length;
+  const totalDokumen = (dashboard.dokumen || []).length;
+  const dokValid = (dashboard.dokumen || []).filter(d => isDocValidKeuanganV70(d)).length;
+  const perluPerbaikan = (dashboard.dokumen || []).filter(d => ["PERBAIKAN","DITOLAK"].includes(String(d.status_verifikasi||"").toUpperCase())).length;
+  document.getElementById("contentArea").innerHTML = `
+    <section class="panel fade-up premium-panel report-menu-panel">
+      <div class="panel-title-row">
+        <div>
+          <h3>Laporan</h3>
+          <p class="panel-sub">Unduh laporan lengkap bidang, mulai dari pagu, perencanaan, riwayat perubahan, sampai dokumen pencairan yang sudah diupload.</p>
+        </div>
+        <button class="btn-refresh" onclick="refreshData()">Refresh Data</button>
+      </div>
+      <div class="report-summary-grid">
+        <div><span>Pagu Bidang</span><strong>${rupiah(r.pagu)}</strong></div>
+        <div><span>Total Perencanaan</span><strong>${rupiah(r.total_perencanaan)}</strong></div>
+        <div><span>Sisa Pagu</span><strong>${rupiah(r.sisa_pagu)}</strong></div>
+        <div><span>Dokumen Valid</span><strong>${dokValid}/${totalDokumen}</strong></div>
+      </div>
+      <div class="report-card-main">
+        <div>
+          <h4>Laporan Lengkap Bidang</h4>
+          <p>Laporan berisi ringkasan anggaran, daftar perencanaan, status persetujuan, alasan penolakan, riwayat perubahan, rekap dokumen pencairan, status dokumen, catatan Verifikator, tanggal upload, dan link file dokumen.</p>
+          <div class="report-tags">
+            <span>${esc(currentUser.nama_bidang || currentUser.bidang || currentUser.nama)}</span>
+            <span>${totalKegiatan} kegiatan</span>
+            <span>${totalDokumen} dokumen</span>
+            <span>${perluPerbaikan} perlu perbaikan</span>
+          </div>
+        </div>
+        <button class="btn-report-pdf" onclick="downloadDashboardPDF()">Download Laporan PDF</button>
+      </div>
+    </section>`;
+}
+
+function bidangName(id){ return dashboard.bidangMap?.[String(id)] || id || "-"; }
+function kegiatanName(id){ const k = dashboard.perencanaan.find(x => String(x.id_kegiatan)===String(id)); return k?.nama_kegiatan || id || "-"; }
+function getPencairanStatus(id){ const p = dashboard.pencairan.find(x => String(x.id_kegiatan)===String(id)); return p?.status_pencairan || dashboard.perencanaan.find(k => String(k.id_kegiatan)===String(id))?.status_pencairan || "BELUM ADA DOKUMEN"; }
+function aksesPerencanaanTerbuka(){
+  if(canSeeAll()) return false;
+  const r = dashboard?.rekap?.find(x => String(x.id_bidang) === String(currentUser.id_bidang));
+  return String(r?.status_akses || currentUser?.status_akses || "").toUpperCase() === "BUKA";
+}
+function isKegiatanLocked(k){
+  const stCair = String(getPencairanStatus(k.id_kegiatan) || "").toUpperCase();
+  if(["DOKUMEN LENGKAP","SIAP DICAIRKAN","SUDAH DICAIRKAN"].includes(stCair)) return true;
+  const docs = (dashboard.dokumen || []).filter(d => String(d.id_kegiatan) === String(k.id_kegiatan));
+  return docs.length > 0 && docs.every(d => String(d.status_verifikasi || "").toUpperCase() === "VALID");
+}
+function bidangOptions(selected="ALL", includeAll=true){
+  return `${includeAll?`<option value="ALL" ${selected==='ALL'?'selected':''}>Semua Bidang</option>`:""}` + dashboard.bidangs.map(b => `<option value="${esc(b.id_bidang)}" ${selected===String(b.id_bidang)?'selected':''}>${esc(b.nama_bidang)}</option>`).join("");
+}
+function pager(total, page, fn){
+  const pages = Math.max(1, Math.ceil(total/perPage));
+  return `<div class="table-footer"><small class="muted">Menampilkan ${total?((page-1)*perPage+1):0}-${Math.min(page*perPage,total)} dari ${total} data</small><div class="pager"><button class="btn-soft" ${page<=1?'disabled':''} onclick="${fn}(${page-1})">Sebelumnya</button><b>${page}/${pages}</b><button class="btn-soft" ${page>=pages?'disabled':''} onclick="${fn}(${page+1})">Berikutnya</button></div></div>`;
+}
+function setPerPage(p){ perPage = Number(p)||10; perencanaanPage=1; pencairanPage=1; renderContent(); }
+function goPerencanaanPage(p){ perencanaanPage=p; renderPerencanaan(); }
+function goPencairanPage(p){ pencairanPage=p; renderPencairan(); }
+
+
+function toggleCollapse(key){
+  collapseState[key] = !collapseState[key];
+  renderContent();
+}
+function collapseButton(key){
+  return `<button class="btn-soft btn-toggle" onclick="toggleCollapse('${key}')">${collapseState[key] ? 'Maximize' : 'Minimize'}</button>`;
+}
+function setAdminEditRow(id, on){
+  VerifikatorEditRows[id] = !!on;
+  renderStruktur();
+}
+function onPaguAdminInput(el){
+  formatAngkaInput(el);
+}
+function renderMonitoring(){
+  const rows = dashboard.rekap.map(r=>{
+    const pct=toNumber(r.pagu)?Math.min(100,Math.round(toNumber(r.total_perencanaan)/toNumber(r.pagu)*100)):0;
+    const over = toNumber(r.sisa_pagu) < 0;
+    return `<tr class="${over?'row-rejected':''}"><td><b>${esc(r.nama_bidang)}</b><br><small class="muted">${esc(r.id_bidang)}</small></td><td>${rupiah(r.pagu)}</td><td>${rupiah(r.total_perencanaan)}</td><td class="${over?'text-danger fw-bold':''}">${rupiah(r.sisa_pagu)}</td><td><div class="progress-bar"><div style="width:${pct}%"></div></div><small>${pct}%</small></td><td>${esc(r.jumlah_kegiatan||0)}</td><td>${esc(r.dokumen_upload||0)}</td><td>${esc(r.dokumen_valid||0)}</td><td>${badge(r.status_akses)}</td><td>${over?badge('MELEBIHI PAGU'):badge(r.status_progress)}</td></tr>`;
+  }).join("");
+  const cards = dashboard.rekap.map(r=>{
+    const pct=toNumber(r.pagu)?Math.min(100,Math.round(toNumber(r.total_perencanaan)/toNumber(r.pagu)*100)):0;
+    const over = toNumber(r.sisa_pagu) < 0;
+    return `<div class="monitor-card ${over?'over-budget':''}">
+      <div class="monitor-head"><div><b>${esc(r.nama_bidang)}</b><small>${esc(r.id_bidang)}</small></div><div>${over?badge('MELEBIHI PAGU'):badge(r.status_progress)}</div></div>
+      <div class="monitor-grid">
+        <div><span>Pagu</span><strong>${rupiah(r.pagu)}</strong></div>
+        <div><span>Perencanaan</span><strong>${rupiah(r.total_perencanaan)}</strong></div>
+        <div><span>Sisa Pagu</span><strong class="${over?'text-danger':''}">${rupiah(r.sisa_pagu)}</strong></div>
+        <div><span>Kegiatan</span><strong>${esc(r.jumlah_kegiatan||0)}</strong></div>
+        <div><span>Dokumen Upload</span><strong>${esc(r.dokumen_upload||0)}</strong></div>
+        <div><span>Dokumen Valid</span><strong>${esc(r.dokumen_valid||0)}</strong></div>
+      </div>
+      <div class="progress-line"><div style="width:${pct}%"></div></div>
+      <div class="monitor-foot"><span>Akses Input</span>${badge(r.status_akses)}</div>
+    </div>`;
+  }).join("");
+  const totalBidang = dashboard.rekap.length;
+  const bidangOver = dashboard.rekap.filter(r => toNumber(r.sisa_pagu) < 0).length;
+  const perluPersetujuan = (dashboard.perencanaan || []).filter(k => ["DIAJUKAN","PERUBAHAN_DIAJUKAN"].includes(String(k.status_perencanaan||"").toUpperCase())).length;
+  const dokMenunggu = (dashboard.dokumen || []).filter(d => ["","MENUNGGU","PERBAIKAN","PERLU PERBAIKAN"].includes(String(d.status_verifikasi||"").toUpperCase())).length;
+  const auditBox = canSeeAll() ? `<div class="review-kpi-grid">
+    <div><span>Total Bidang</span><strong>${totalBidang}</strong></div>
+    <div><span>Perlu Persetujuan</span><strong>${perluPersetujuan}</strong></div>
+    <div><span>Dokumen Perlu Dicek</span><strong>${dokMenunggu}</strong></div>
+    <div><span>Bidang Melebihi Pagu</span><strong class="${bidangOver?'text-danger':''}">${bidangOver}</strong></div>
+  </div>` : "";
+  document.getElementById("contentArea").innerHTML = `<section class="panel fade-up"><div class="panel-title-row"><div><h3>${isReviewer()?'Dashboard Pemeriksaan':'Dashboard Monitoring Admin'}</h3><p class="panel-sub">${isReviewer()?'Tampilan khusus pemeriksaan seluruh bidang: pagu, perencanaan, dokumen, status akses, dan progres.':'Pantauan perencanaan dan pencairan dari semua bidang.'}</p></div><div class="action-group"><button class="btn-refresh" onclick="refreshData()">Refresh Data</button><button class="btn-soft btn-report" onclick="downloadDashboardPDF()">Cetak Laporan PDF</button></div></div>${auditBox}<div class="monitor-card-list">${cards || `<p class="empty">Belum ada data</p>`}</div><div class="table-hint">Geser tabel ke samping untuk melihat kolom lainnya.</div><div class="table-wrap dashboard-table" style="margin-top:10px"><table><thead><tr><th>Bidang</th><th>Pagu</th><th>Perencanaan</th><th>Sisa</th><th>%</th><th>Kegiatan</th><th>Dok Upload</th><th>Dok Valid</th><th>Akses</th><th>Progress</th></tr></thead><tbody>${rows || `<tr><td colspan="12" class="empty">Belum ada data</td></tr>`}</tbody></table></div></section>`;
+}
+function renderStruktur(){
+  if(canManage()){
+    const rows = dashboard.rekap.map(r=>{
+      const id = String(r.id_bidang);
+      const editing = !!VerifikatorEditRows[id];
+      const paguView = angkaID(r.pagu);
+      return `<div class="Verifikator-row premium-row ${editing?'editing':''}">
+        <div><b>${esc(r.nama_bidang)}</b><br><small class="muted">${esc(r.id_bidang)}</small><br><small>Total: ${rupiah(r.total_perencanaan)} | Sisa: ${rupiah(r.sisa_pagu)}</small></div>
+        <div class="field"><label>Pagu</label>${editing?`<input id="pagu_${esc(r.id_bidang)}" inputmode="numeric" value="${paguView}" oninput="onPaguAdminInput(this)">`:`<div class="readonly-display">Rp ${paguView}</div>`}</div>
+        <div class="field"><label>Akses</label>${editing?`<select id="akses_${esc(r.id_bidang)}"><option value="BUKA" ${r.status_akses==='BUKA'?'selected':''}>BUKA</option><option value="TUTUP" ${r.status_akses==='TUTUP'?'selected':''}>TUTUP</option></select>`:`<div class="readonly-display">${esc(r.status_akses || '-')}</div>`}</div>
+        <div>${badge(r.status_progress)}</div>
+        <div class="Verifikator-actions">${editing?`<button onclick="updateBidang('${esc(r.id_bidang)}')">Simpan</button><button class="btn-soft" onclick="setAdminEditRow('${esc(r.id_bidang)}', false)">Batal</button>`:`<button class="btn-mini" onclick="setAdminEditRow('${esc(r.id_bidang)}', true)">Edit</button>`}</div>
+      </div>`;
+    }).join("");
+    document.getElementById("contentArea").innerHTML = `<section class="panel fade-up premium-panel"><h3>Struktur Anggaran</h3><p class="panel-sub">Admin mengatur pagu dan akses input tiap bidang. Klik Edit dulu untuk mengubah data.</p>${rows || `<p class="muted">Belum ada bidang.</p>`}</section>`;
+  } else if(isReviewer()){
+    const cards = dashboard.rekap.map(r=>{
+      const over = toNumber(r.sisa_pagu) < 0;
+      return `<div class="review-row ${over?'over-budget':''}">
+        <div class="review-title"><b>${esc(r.nama_bidang)}</b><small>${esc(r.id_bidang)}</small></div>
+        <div class="review-metrics">
+          <div><span>Pagu</span><strong>${rupiah(r.pagu)}</strong></div>
+          <div><span>Total Perencanaan</span><strong>${rupiah(r.total_perencanaan)}</strong></div>
+          <div><span>Sisa Pagu</span><strong class="${over?'text-danger':''}">${rupiah(r.sisa_pagu)}</strong></div>
+          <div><span>Kegiatan</span><strong>${esc(r.jumlah_kegiatan||0)}</strong></div>
+          <div><span>Dokumen</span><strong>${esc(r.dokumen_upload||0)} upload / ${esc(r.dokumen_valid||0)} valid</strong></div>
+        </div>
+        <div class="review-status">${badge(r.status_akses)} ${over?badge('MELEBIHI PAGU'):badge(r.status_progress)}</div>
+      </div>`;
+    }).join("");
+    document.getElementById("contentArea").innerHTML = `<section class="panel fade-up premium-panel"><div class="panel-title-row"><div><h3>Struktur Anggaran - Mode Pemeriksaan</h3><p class="panel-sub">Role ${roleLabel()} dapat melihat seluruh bidang secara read-only untuk memeriksa pagu, total perencanaan, sisa pagu, dokumen, dan status akses.</p></div><div class="action-group"><button class="btn-refresh" onclick="refreshData()">Refresh Data</button></div></div><div class="review-list">${cards || `<p class="muted">Belum ada bidang.</p>`}</div></section>`;
+  } else {
+    const r = dashboard.rekap.find(x=>String(x.id_bidang)===String(currentUser.id_bidang)) || {};
+    document.getElementById("contentArea").innerHTML = `<section class="panel fade-up premium-panel"><h3>Ringkasan Bidang</h3><p class="panel-sub">Informasi anggaran dan progres bidang.</p><div class="action-group"><button class="btn-refresh" onclick="refreshData()">Refresh Data</button></div><div class="table-wrap" style="margin-top:14px"><table><thead><tr><th>Bidang</th><th>Pagu</th><th>Total Perencanaan</th><th>Sisa</th><th>Kegiatan</th><th>Dokumen</th><th>Akses</th><th>Progress</th></tr></thead><tbody><tr><td>${esc(r.nama_bidang)}</td><td>${rupiah(r.pagu)}</td><td>${rupiah(r.total_perencanaan)}</td><td>${rupiah(r.sisa_pagu)}</td><td>${esc(r.jumlah_kegiatan||0)}</td><td>${esc(r.dokumen_upload||0)}</td><td>${badge(r.status_akses)}</td><td>${badge(r.status_progress)}</td></tr></tbody></table></div></section>`;
+  }
+}
+function filterBarPerencanaan(){
+  return `<div class="filter-card"><div class="toolbar">${canSeeAll()?`<div class="field small"><label>Filter Bidang</label><select onchange="filters.rencanaBidang=this.value;perencanaanPage=1;renderPerencanaan()">${bidangOptions(filters.rencanaBidang,true)}</select></div>`:""}<div class="field small"><label>Filter Status</label><select onchange="filters.rencanaStatus=this.value;perencanaanPage=1;renderPerencanaan()"><option value="ALL">Semua Status</option>${["DIAJUKAN","DISETUJUI","PERLU PERBAIKAN","PERUBAHAN_DIAJUKAN"].map(s=>`<option value="${s}" ${filters.rencanaStatus===s?'selected':''}>${s}</option>`).join("")}</select></div><div class="field"><label>Search Nama Kegiatan</label><input value="${esc(filters.rencanaSearch)}" placeholder="Cari nama kegiatan..." oninput="filters.rencanaSearch=this.value;perencanaanPage=1;renderPerencanaan()"></div><div class="field small"><label>Per Halaman</label><select onchange="setPerPage(this.value)"><option ${perPage===10?'selected':''}>10</option><option ${perPage===25?'selected':''}>25</option><option ${perPage===50?'selected':''}>50</option></select></div><button class="btn-refresh" onclick="refreshData()">Refresh</button></div></div>`;
+}
+function getFilteredRencana(){
+  let data = dashboard.perencanaan.filter(k=>k.id_kegiatan);
+  if(canSeeAll() && filters.rencanaBidang !== "ALL") data = data.filter(k => String(k.id_bidang)===filters.rencanaBidang);
+  if(filters.rencanaStatus !== "ALL") data = data.filter(k => String(k.status_perencanaan||"").toUpperCase()===filters.rencanaStatus);
+  const q = filters.rencanaSearch.trim().toLowerCase();
+  if(q) data = data.filter(k => String(k.nama_kegiatan||"").toLowerCase().includes(q));
+  return data;
+}
+function renderPerencanaan(){
+  const data = getFilteredRencana();
+  const pageData = data.slice((perencanaanPage-1)*perPage, perencanaanPage*perPage);
+  let html = "";
+  if(!canSeeAll()){
+    if(aksesPerencanaanTerbuka()){
+      html += `<section class="panel fade-up premium-panel collapsible-panel"><div class="panel-head"><div><h3>Input Perencanaan</h3><p class="panel-sub">Input rencana kegiatan/kebutuhan. Setelah disimpan, status langsung DIAJUKAN ke Verifikator.</p></div>${collapseButton('perencanaanInput')}</div><div class="collapse-body ${collapseState.perencanaanInput?'hidden':''}"><div class="form-grid"><div class="field"><label>Nama Kegiatan</label><input id="namaKegiatan" placeholder="Contoh: Rapat Koordinasi"></div><div class="field"><label>Keterangan</label><input id="keterangan" placeholder="Opsional"></div><div class="field"><label>Volume</label><input id="volume" inputmode="numeric" placeholder="Contoh: 2" oninput="onAngkaInput(this)"></div><div class="field"><label>Satuan</label><input id="satuan" placeholder="Orang / Paket / Buah"></div><div class="field"><label>Harga Satuan</label><input id="harga" inputmode="numeric" placeholder="Contoh: 500.000" oninput="onAngkaInput(this)"></div><div class="field"><label>Total Otomatis</label><input id="totalPreview" class="readonly-total" value="Rp0" readonly></div><div class="field"><label>Metode</label><input id="metodePemilihan" class="readonly-total" placeholder="Otomatis sesuai pagu" readonly></div><div class="field"><label>Waktu Pemilihan</label><input id="waktuPemilihan" type="date" onchange="onWaktuPemilihanInput(false)"></div></div><div id="metodePreview" class="metode-preview"></div><button onclick="savePerencanaan()">Simpan & Ajukan</button><div id="saveMsg" class="msg"></div></div></section>`;
+    } else {
+      html += `<section class="panel fade-up locked-panel"><h3>Perencanaan Ditutup</h3><p class="panel-sub">🔒 Akses perencanaan bidang sedang ditutup oleh Verifikator. Kamu masih bisa membuka menu Pencairan untuk upload/revisi dokumen.</p></section>`;
+    }
+  }
+  const rows = pageData.map(k=>renderPerencanaanRow(k)).join("");
+  html += `<section class="panel fade-up"><h3>${isAdmin()?"Persetujuan Perencanaan":(isReviewer()?"Pemeriksaan Data Perencanaan":"Data Perencanaan")}</h3><p class="panel-sub">${isAdmin()?"Admin menyetujui/menolak perencanaan bidang.":(isReviewer()?"Role pemeriksa dapat melihat semua perencanaan, status, alasan penolakan, dan riwayat perubahan secara read-only.":"Daftar rencana kegiatan bidang sendiri.")}</p>${filterBarPerencanaan()}<div class="table-hint">Geser tabel ke samping untuk melihat kolom lainnya.</div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Bidang</th><th>Nama Kegiatan</th><th>Vol</th><th>Satuan</th><th>Harga</th><th>Jumlah</th><th>Metode</th><th>Waktu Pemilihan</th><th>Status</th><th>Alasan / Riwayat</th><th>Aksi</th></tr></thead><tbody>${rows || `<tr><td colspan="12" class="empty">Belum ada data</td></tr>`}</tbody></table></div>${pager(data.length, perencanaanPage, 'goPerencanaanPage')}</section>`;
+  document.getElementById("contentArea").innerHTML = html;
+  if(!canSeeAll()) setTimeout(updateSaranDokumen, 0);
+}
+
+function renderPerencanaanRow(k){
+  const st = String(k.status_perencanaan||"DIAJUKAN").toUpperCase();
+  const locked = isKegiatanLocked(k);
+  const aksesBuka = aksesPerencanaanTerbuka();
+  const note = `${k.alasan_penolakan?`<div class="reason-box"><b>Catatan penyesuaian:</b><br>${esc(k.alasan_penolakan)}</div>`:""}${k.alasan_perubahan?`<div class="history-box"><b>Alasan perubahan:</b><br>${esc(k.alasan_perubahan)}</div>`:""}${k.riwayat_perubahan?`<div class="history-box"><b>Riwayat:</b><br>${esc(k.riwayat_perubahan).replace(/\n/g,'<br>')}</div>`:""}` || `<span class="muted">-</span>`;
+  let aksi = "";
+  if(canManage()){
+    if(st === "DIAJUKAN" || st === "PERUBAHAN_DIAJUKAN") aksi = `<button class="btn-mini btn-green" onclick="setujui('${esc(k.id_kegiatan)}')">Setujui</button><button class="btn-mini btn-orange" onclick="tolak('${esc(k.id_kegiatan)}')">Minta Perbaikan</button>`;
+    else aksi = `<span class="muted">-</span>`;
+  } else if(isReviewer()){
+    aksi = `<span class="audit-pill">Read-only</span>`;
+  } else if(locked){
+    aksi = `<span class="status-done-pill">Selesai</span>`;
+  } else if(!aksesBuka){
+    aksi = `<span class="lock-badge">Akses perencanaan ditutup</span>`;
+  } else {
+    if(st === "DIAJUKAN" || st === "DITOLAK") aksi = `<button class="btn-mini" onclick="openEditModal('${esc(k.id_kegiatan)}','normal')">Edit</button><button class="btn-mini btn-red" onclick="hapusPerencanaan('${esc(k.id_kegiatan)}')">Hapus</button>`;
+    else if(st === "DISETUJUI") aksi = `<button class="btn-mini btn-orange" onclick="openEditModal('${esc(k.id_kegiatan)}','change')">Ajukan Perubahan</button>`;
+    else aksi = `<span class="muted">Menunggu Verifikator</span>`;
+  }
+  const perubahan = toNumber(k.perubahan_ke) ? `<br><small class="muted">Perubahan Ke-${toNumber(k.perubahan_ke)}</small>` : "";
+  const rowClass = locked ? "row-selesai" : (st === "DITOLAK" ? "row-perbaikan" : "row-proses");
+  return `<tr class="rencana-row ${rowClass}"><td>${esc(k.id_kegiatan)}</td><td>${esc(bidangName(k.id_bidang))}</td><td><b>${esc(k.nama_kegiatan)}</b>${perubahan}</td><td>${esc(k.volume)}</td><td>${esc(k.satuan)}</td><td>${rupiah(k.harga_satuan)}</td><td><b>${rupiah(k.jumlah || (toNumber(k.volume)*toNumber(k.harga_satuan)))}</b></td><td>${esc(k.metode_pemilihan || metodePemilihanByNilai(k.jumlah || (toNumber(k.volume)*toNumber(k.harga_satuan))))}</td><td>${esc(formatTanggalID(k.waktu_pemilihan || waktuPemilihanByNilai(k.jumlah || (toNumber(k.volume)*toNumber(k.harga_satuan)))))}</td><td>${badge(st)}</td><td class="note-cell">${note}</td><td class="nowrap">${aksi}</td></tr>`;
+}
+
+
+function getFilteredDokumen(){
+  let docs = dashboard.dokumen || [];
+  if(canSeeAll() && filters.cairBidang !== "ALL") docs = docs.filter(d => String(d.id_bidang)===filters.cairBidang);
+  if(filters.cairStatus !== "ALL") docs = docs.filter(d => String(d.status_verifikasi||"").toUpperCase()===filters.cairStatus);
+  const q = filters.cairSearch.trim().toLowerCase();
+  if(q) docs = docs.filter(d => kegiatanName(d.id_kegiatan).toLowerCase().includes(q));
+  return docs;
+}
+function getRoleReportTitle(){
+  return isAdmin() ? "ADMIN PBJ" : (isReviewer() ? roleLabel() : (currentUser?.nama_bidang || currentUser?.nama || "BIDANG"));
+}
+
+function formalReportText(v){
+  return String(v == null ? "" : v)
+    .replace(/ADA YANG DITOLAK/g, "PERLU PENYESUAIAN")
+    .replace(/DITOLAK/g, "PERLU PERBAIKAN")
+    .replace(/Ada yang ditolak/g, "Perlu Penyesuaian")
+    .replace(/Ditolak/g, "Perlu Perbaikan")
+    .replace(/ditolak/g, "perlu perbaikan");
+}
+
+function plainText(v){ return String(v == null ? "" : v).replace(/[<>&]/g, s => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[s])); }
+function htmlLink(url, label){
+  if(!url) return "-";
+  return `<a href="${esc(url)}" target="_blank">${plainText(label || "Buka File")}</a>`;
+}
+function formatTanggalCetak(date = new Date()){
+  return new Intl.DateTimeFormat('id-ID', {
+    weekday:'long', day:'2-digit', month:'long', year:'numeric',
+    hour:'2-digit', minute:'2-digit', second:'2-digit', timeZone:'Asia/Jakarta', hour12:false
+  }).format(date).replace(/\./g, ':') + ' WIB';
+}
+function openReportWindow(title, bodyHtml){
+  const now = formatTanggalCetak();
+  const w = window.open("", "_blank");
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${plainText(title)}</title>
+  <style>
+    @page{size:A4 landscape;margin:12mm}
+    *{box-sizing:border-box}
+    body{font-family:Arial, Helvetica, sans-serif;color:#17263a;margin:0;background:#fff;font-size:10.5px;line-height:1.45}
+    .report-page{width:100%}
+    .kop{display:grid;grid-template-columns:58px 1fr auto;gap:14px;align-items:center;border-bottom:3px solid #0a3d70;padding-bottom:10px;margin-bottom:4px}
+    .kop img{width:54px;height:54px;object-fit:contain}
+    .kop h1{font-size:18px;line-height:1.2;margin:0;color:#0a3d70;text-transform:uppercase;letter-spacing:.2px}
+    .kop .instansi{font-size:11px;font-weight:700;color:#26384f;margin-top:3px}
+    .kop .meta{font-size:10px;color:#45566d;text-align:right;min-width:230px;line-height:1.5}
+    .title-block{text-align:center;margin:12px 0 10px}
+    .title-block h2{font-size:16px;text-transform:uppercase;margin:0;color:#0a3d70;text-decoration:underline}
+    .title-block .sub{font-size:10.5px;color:#506176;margin-top:4px}
+    .summary{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin:10px 0 12px}
+    .card{border:1px solid #bdd4e8;border-radius:8px;padding:8px;background:#f7fbff;min-height:48px}
+    .card span{display:block;font-size:8.5px;text-transform:uppercase;color:#53677e;font-weight:800;letter-spacing:.2px}
+    .card b{display:block;font-size:12.5px;color:#0a3d70;margin-top:3px;line-height:1.25}
+    h3{font-size:12.5px;margin:14px 0 6px;color:#0a3d70;text-transform:uppercase;border-left:4px solid #0a7bbf;padding-left:7px}
+    .note{padding:7px 9px;background:#fff9eb;border:1px solid #f5d489;border-radius:7px;margin:8px 0;color:#594100;font-size:9.8px}
+    table{width:100%;border-collapse:collapse;margin-top:5px;page-break-inside:auto}
+    thead{display:table-header-group}
+    tr{page-break-inside:avoid;page-break-after:auto}
+    th{background:#eaf3fb;color:#0a315a;font-size:8.1px;text-transform:uppercase;letter-spacing:.15px;text-align:left;font-weight:800}
+    th,td{border:1px solid #cdddea;padding:4.5px 5px;vertical-align:top}
+    td{font-size:8.8px}
+    tbody tr:nth-child(even) td{background:#fbfdff}
+    a{color:#006bb6;text-decoration:underline;font-weight:700;word-break:break-all}
+    .status{font-weight:800;color:#0a3d70}
+    .red{color:#b91c1c;font-weight:800}
+    .small{font-size:8px;color:#5c6e82}
+    .signature{display:grid;grid-template-columns:1fr 280px;margin-top:20px;break-inside:avoid}
+    .sign-box{text-align:center;font-size:10px;color:#1f2f45}
+    .sign-space{height:54px}
+    .btn-print{position:fixed;right:18px;top:18px;background:#0878bd;color:#fff;border:none;border-radius:9px;padding:10px 14px;font-weight:700;cursor:pointer;box-shadow:0 8px 20px rgba(0,0,0,.18)}
+
+    td:nth-child(12),td:nth-child(13){line-height:1.35}
+    .note b{color:#0a3d70}
+    .report-page table{font-size:8.4px}
+    .doc-report-item{padding:5px 0;border-bottom:1px dashed #cbd5e1}
+    .doc-report-item:last-child{border-bottom:0}
+    .doc-report-item b{color:#0a3d70}
+    td:nth-child(7){line-height:1.35}
+    .doc-report-item{padding:5px 0;border-bottom:1px dashed #cbd5e1}
+    .doc-report-item:last-child{border-bottom:0}
+    .doc-report-item b{color:#0a3d70}
+    .report-page table{font-size:8.2px}
+    @media print{.btn-print{display:none} a{color:#005ea8}.report-page{width:auto}}
+  </style></head><body><button class="btn-print" onclick="window.print()">Cetak / Simpan PDF</button><div class="report-page">
+  <div class="kop"><img src="logo-siporbo.png"><div><h1>SIMPROV</h1><div class="instansi">Sistem Informasi Monitoring Persiapan PORPROV</div><div class="small">Laporan Monitoring Persiapan PORPROV</div></div><div class="meta"><b>Tanggal Cetak</b><br>${plainText(now)}<br><b>Dicetak oleh</b><br>${plainText(getRoleReportTitle())}</div></div>
+  <div class="title-block"><h2>${plainText(title)}</h2><div class="sub">Memuat rekap pagu, perencanaan, riwayat perubahan, dokumen pencairan, link dokumen, dan status verifikasi.</div></div>
+  ${bodyHtml}
+  
+  <div class="signature"><div></div><div class="sign-box">Bogor, ${plainText(new Intl.DateTimeFormat('id-ID',{day:'2-digit',month:'long',year:'numeric',timeZone:'Asia/Jakarta'}).format(new Date()))}<br>Petugas/Pemeriksa,<div class="sign-space"></div>(........................................)</div></div>
+  </div></body></html>`;
+  w.document.open(); w.document.write(html); w.document.close();
+}
+function downloadDashboardPDF(){
+  const userBidang = String(currentUser?.id_bidang || "");
+  const semuaBidang = canSeeAll();
+  const rekap = semuaBidang ? (dashboard.rekap || []) : (dashboard.rekap || []).filter(r => String(r.id_bidang) === userBidang);
+  const perencanaan = semuaBidang ? (dashboard.perencanaan || []) : (dashboard.perencanaan || []).filter(k => String(k.id_bidang) === userBidang);
+  const dokumen = semuaBidang ? (dashboard.dokumen || []) : (dashboard.dokumen || []).filter(d => String(d.id_bidang) === userBidang);
+  const pagu = rekap.reduce((s,r)=>s+toNumber(r.pagu),0);
+  const total = rekap.reduce((s,r)=>s+toNumber(r.total_perencanaan),0);
+  const sisa = pagu - total;
+  const valid = dokumen.filter(d=>isDocValidKeuanganV70(d)).length;
+  const perluPersetujuan = perencanaan.filter(k => ["DIAJUKAN","PERUBAHAN_DIAJUKAN"].includes(String(k.status_perencanaan||"").toUpperCase())).length;
+  const bidangOver = rekap.filter(r => toNumber(r.sisa_pagu) < 0).length;
+
+  const rowsRekap = rekap.map((r,i)=>`<tr><td>${i+1}</td><td>${plainText(r.nama_bidang)}<br><span class="small">${plainText(r.id_bidang)}</span></td><td>${rupiah(r.pagu)}</td><td>${rupiah(r.total_perencanaan)}</td><td class="${toNumber(r.sisa_pagu)<0?'red':''}">${rupiah(r.sisa_pagu)}</td><td>${plainText(r.jumlah_kegiatan||0)}</td><td>${plainText(r.dokumen_upload||0)}</td><td>${plainText(r.dokumen_valid||0)}</td><td>${plainText(r.status_akses||'-')}</td><td class="status">${plainText(toNumber(r.sisa_pagu)<0?'MELEBIHI PAGU':displayStatusText(r.status_progress||'-'))}</td></tr>`).join("");
+
+  const rowsPerencanaan = perencanaan.map((k,i)=>{
+    const alasan = [k.alasan_penolakan ? `Catatan penyesuaian: ${k.alasan_penolakan}` : '', k.alasan_perubahan ? `Alasan perubahan: ${k.alasan_perubahan}` : '', k.riwayat_perubahan ? `Riwayat: ${k.riwayat_perubahan}` : ''].filter(Boolean).join('\n');
+    return `<tr><td>${i+1}</td><td>${plainText(k.id_kegiatan)}</td><td>${plainText(bidangName(k.id_bidang))}</td><td>${plainText(k.nama_kegiatan)}</td><td>${plainText(k.keterangan||'-')}</td><td>${plainText(k.volume||0)} ${plainText(k.satuan||'')}</td><td>${rupiah(k.harga_satuan)}</td><td>${rupiah(k.jumlah)}</td><td>${plainText(k.metode_pemilihan || metodePemilihanByNilai(k.jumlah))}</td><td>${plainText(formatTanggalID(k.waktu_pemilihan || waktuPemilihanByNilai(k.jumlah)))}</td><td class="status">${plainText(displayStatusText(k.status_perencanaan||'-'))}</td><td>${plainText(formalReportText(alasan||'-')).replace(/\n/g,'<br>')}</td><td>${plainText(displayStatusText(k.status_pencairan||'-'))}</td></tr>`;
+  }).join("");
+
+  const rowsDokumen = dokumen.map((d,i)=>`<tr><td>${i+1}</td><td>${plainText(bidangName(d.id_bidang))}</td><td>${plainText(kegiatanName(d.id_kegiatan))}<br><span class="small">${plainText(d.id_kegiatan)}</span></td><td>${plainText(normalizeJenisDokumenLabel(d.jenis_dokumen))}</td><td>${plainText(d.nama_file||'-')}</td><td>${htmlLink(d.url_file, 'Buka File')}</td><td class="status">${plainText(displayStatusText(d.status_verifikasi||'MENUNGGU'))}</td><td>${plainText(displayStatusText(getPencairanStatus(d.id_kegiatan)))}</td><td>${plainText(d.catatan_Verifikator||'-')}</td><td>${plainText(formatTanggalJam(d.tanggal_upload))}</td></tr>`).join("");
+
+  const body = `<div class="summary"><div class="card"><span>Total Pagu</span><b>${rupiah(pagu)}</b></div><div class="card"><span>Total Perencanaan</span><b>${rupiah(total)}</b></div><div class="card"><span>Sisa Pagu</span><b class="${sisa<0?'red':''}">${rupiah(sisa)}</b></div><div class="card"><span>Dokumen Valid</span><b>${valid}/${dokumen.length}</b></div><div class="card"><span>Perlu Pemeriksaan</span><b>${perluPersetujuan} rencana / ${bidangOver} pagu minus</b></div></div>
+  <h3>1. Rekapitulasi Anggaran per Bidang</h3><table><thead><tr><th>No</th><th>Bidang</th><th>Pagu</th><th>Perencanaan</th><th>Sisa</th><th>Kegiatan</th><th>Dok Upload</th><th>Dok Valid</th><th>Akses</th><th>Progress</th></tr></thead><tbody>${rowsRekap || `<tr><td colspan="10">Belum ada data</td></tr>`}</tbody></table>
+  <h3>2. Rekap Data Perencanaan dan Riwayat Perubahan</h3><table><thead><tr><th>No</th><th>ID Kegiatan</th><th>Bidang</th><th>Nama Kegiatan</th><th>Keterangan</th><th>Volume</th><th>Harga Satuan</th><th>Jumlah</th><th>Metode</th><th>Waktu Pemilihan</th><th>Status</th><th>Alasan/Riwayat</th><th>Status Pencairan</th></tr></thead><tbody>${rowsPerencanaan || `<tr><td colspan="13">Belum ada data perencanaan</td></tr>`}</tbody></table>
+  <h3>3. Rekap Dokumen Pencairan dan Link File</h3><table><thead><tr><th>No</th><th>Bidang</th><th>Kegiatan</th><th>Jenis Dokumen</th><th>Nama File</th><th>Link File</th><th>Status Dokumen</th><th>Status Pencairan</th><th>Catatan Admin</th><th>Tanggal Upload</th></tr></thead><tbody>${rowsDokumen || `<tr><td colspan="10">Belum ada dokumen pencairan</td></tr>`}</tbody></table>`;
+  openReportWindow(semuaBidang ? "Laporan Monitoring Keseluruhan SIMPROV" : "Laporan Monitoring Bidang " + (currentUser?.nama_bidang || currentUser?.nama || ""), body);
+}
+function downloadPerencanaanPDF(){
+  const data = getFilteredRencana();
+  const rows = data.map(k=>`<tr><td>${plainText(k.id_kegiatan)}</td><td>${plainText(bidangName(k.id_bidang))}</td><td>${plainText(k.nama_kegiatan)}</td><td>${plainText(k.keterangan||"-")}</td><td>${plainText(k.volume||0)}</td><td>${plainText(k.satuan||"-")}</td><td>${rupiah(k.harga_satuan)}</td><td>${rupiah(k.jumlah)}</td><td>${plainText(displayStatusText(k.status_perencanaan||"-"))}</td><td>${plainText((k.alasan_penolakan||k.alasan_perubahan||k.riwayat_perubahan||"-")).replace(/\n/g,"<br>")}</td><td>${plainText(displayStatusText(k.status_pencairan||"-"))}</td></tr>`).join("");
+  openReportWindow("Rekap Perencanaan", `<div class="note">Laporan mengikuti filter yang sedang tampil pada aplikasi.</div><table><thead><tr><th>ID</th><th>Bidang</th><th>Nama Kegiatan</th><th>Keterangan</th><th>Vol</th><th>Satuan</th><th>Harga</th><th>Jumlah</th><th>Metode</th><th>Waktu Pemilihan</th><th>Status</th><th>Alasan / Riwayat</th><th>Status Pencairan</th></tr></thead><tbody>${rows || `<tr><td colspan="13">Belum ada data</td></tr>`}</tbody></table>`);
+}
+function downloadPencairanPDF(){
+  const docs = getFilteredDokumen();
+  const rows = docs.map(d=>`<tr><td>${plainText(bidangName(d.id_bidang))}</td><td>${plainText(kegiatanName(d.id_kegiatan))}<br><small>${plainText(d.id_kegiatan)}</small></td><td>${plainText(normalizeJenisDokumenLabel(d.jenis_dokumen))}</td><td>${plainText(d.nama_file||"-")}</td><td>${htmlLink(d.url_file, "Buka File")}</td><td>${plainText(displayStatusText(d.status_verifikasi||"MENUNGGU"))}</td><td>${plainText(displayStatusText(getPencairanStatus(d.id_kegiatan)))}</td><td>${plainText(d.catatan_Verifikator||"-")}</td><td>${plainText(formatTanggalJam(d.tanggal_upload))}</td></tr>`).join("");
+  openReportWindow("Rekap Dokumen & Pencairan", `<div class="note">Laporan ini menampilkan link dokumen yang sudah diupload bidang. Klik “Buka File” untuk membuka dokumen dari Google Drive.</div><table><thead><tr><th>Bidang</th><th>Kegiatan</th><th>Jenis Dokumen</th><th>Nama File</th><th>Link File</th><th>Status Dokumen</th><th>Status Pencairan</th><th>Catatan Admin</th><th>Tanggal Upload</th></tr></thead><tbody>${rows || `<tr><td colspan="9">Belum ada dokumen</td></tr>`}</tbody></table>`);
+}
+function downloadStrukturPDF(){
+  if(canSeeAll()) return downloadDashboardPDF();
+  const r = dashboard.rekap.find(x=>String(x.id_bidang)===String(currentUser.id_bidang)) || {};
+  openReportWindow("Ringkasan Bidang", `<div class="summary"><div class="card"><span>Bidang</span><b>${plainText(r.nama_bidang||"-")}</b></div><div class="card"><span>Pagu</span><b>${rupiah(r.pagu)}</b></div><div class="card"><span>Total Perencanaan</span><b>${rupiah(r.total_perencanaan)}</b></div><div class="card"><span>Sisa Pagu</span><b>${rupiah(r.sisa_pagu)}</b></div></div><table><thead><tr><th>Kegiatan</th><th>Dokumen Upload</th><th>Dokumen Valid</th><th>Status Akses</th><th>Progress</th></tr></thead><tbody><tr><td>${plainText(r.jumlah_kegiatan||0)}</td><td>${plainText(r.dokumen_upload||0)}</td><td>${plainText(r.dokumen_valid||0)}</td><td>${plainText(r.status_akses||"-")}</td><td>${plainText(displayStatusText(r.status_progress||"-"))}</td></tr></tbody></table>`);
+}
+
+
+function filterBarPencairan(){
+  return `<div class="filter-card"><div class="toolbar">${canSeeAll()?`<div class="field small"><label>Filter Bidang</label><select onchange="filters.cairBidang=this.value;pencairanPage=1;renderPencairan()">${bidangOptions(filters.cairBidang,true)}</select></div>`:""}<div class="field small"><label>Filter Status Dokumen</label><select onchange="filters.cairStatus=this.value;pencairanPage=1;renderPencairan()"><option value="ALL">Semua Status</option>${["MENUNGGU","VALID","PERLU PERBAIKAN","PERBAIKAN"].map(s=>`<option value="${s}" ${filters.cairStatus===s?'selected':''}>${s}</option>`).join("")}</select></div><div class="field"><label>Search Nama Kegiatan</label><input value="${esc(filters.cairSearch)}" placeholder="Cari nama kegiatan..." oninput="filters.cairSearch=this.value;pencairanPage=1;renderPencairan()"></div><button class="btn-refresh" onclick="refreshData()">Refresh</button></div></div>`;
+}
+function renderPencairan(){
+  let html = "";
+  if(!canSeeAll()){
+    const approved = dashboard.perencanaan.filter(k => String(k.status_perencanaan||"").toUpperCase()==="DISETUJUI");
+    html += `<section class="panel fade-up premium-panel collapsible-panel"><div class="panel-head"><div><h3>Upload Dokumen Pencairan</h3><p class="panel-sub">Satu kegiatan bisa upload lebih dari satu dokumen. Tambah baris file jika dokumennya lebih dari satu.</p></div>${collapseButton('uploadPencairan')}</div><div class="collapse-body ${collapseState.uploadPencairan?'hidden':''}"><div class="form-grid"><div class="field"><label>Pilih Kegiatan</label><select id="dokKegiatan" onchange="updateSaranDokumen()">${approved.map(k=>`<option value="${esc(k.id_kegiatan)}">${esc(k.nama_kegiatan)} - ${esc(k.metode_pemilihan || metodePemilihanByNilai(k.jumlah))}</option>`).join("")}</select><div id="saranDokumen" class="auto-doc-note-wrap"></div></div></div><div id="uploadRows"><div class="doc-upload-row"><div class="field"><label>Jenis Dokumen</label><select class="jenisDok">${docOptionsHtml("", approved[0]?.id_kegiatan || "")}</select></div><div class="field"><label>File Dokumen</label><input type="file" class="fileDok"></div><button class="btn-red" onclick="removeUploadRow(this)" type="button">Hapus</button></div></div><button class="btn-soft" onclick="addUploadRow()" type="button">+ Tambah File Dokumen</button> <button onclick="uploadDokumen()">Upload Semua Dokumen</button><div id="uploadMsg" class="msg">${approved.length?"":"Belum ada kegiatan yang DISETUJUI Verifikator."}</div></div></section>`;
+  }
+  let docs = getFilteredDokumen();
+  const pageData = docs.slice((pencairanPage-1)*perPage, pencairanPage*perPage);
+  const rows = pageData.map(d=>renderDokumenRow(d)).join("");
+  html += `<section class="panel fade-up"><h3>Data Dokumen & Pencairan</h3><p class="panel-sub">${isAdmin()?"Admin memverifikasi dokumen dan memperbarui status pencairan.":(isReviewer()?"Role pemeriksa dapat melihat seluruh dokumen, status verifikasi, status pencairan, dan catatan Verifikator secara read-only.":"Daftar dokumen yang sudah diupload.")}</p>${filterBarPencairan()}<div class="table-hint">Geser tabel ke samping untuk melihat kolom lainnya.</div><div class="table-wrap"><table><thead><tr><th>Bidang</th><th>Kegiatan</th><th>Jenis Dokumen</th><th>File</th><th>Status Dokumen</th><th>Status Pencairan</th><th>Tanggal Upload</th><th>Catatan</th><th>Aksi</th></tr></thead><tbody>${rows || `<tr><td colspan="9" class="empty">Belum ada dokumen</td></tr>`}</tbody></table></div>${pager(docs.length, pencairanPage, 'goPencairanPage')}</section>`;
+  document.getElementById("contentArea").innerHTML = html;
+  if(!canSeeAll()) setTimeout(updateSaranDokumen, 0);
+}
+function renderDokumenRow(d){
+  const st = String(d.status_verifikasi || 'MENUNGGU').toUpperCase();
+  let aksi = `<span class="muted">-</span>`;
+  if(canManage()){
+    aksi = `<button class="btn-mini btn-green" onclick="verifDok('${esc(d.id_dokumen)}','VALID')">Valid</button>` +
+           `<button class="btn-mini btn-orange" onclick="mintaPerbaikanDok('${esc(d.id_dokumen)}')">Perbaikan</button>`;
+  } else if(isReviewer()){
+    aksi = `<span class="audit-pill">Read-only</span>`;
+  } else if(st === 'PERBAIKAN' || st === 'DITOLAK'){
+    aksi = `<div class="revision-box per-file-revision">
+      <div class="revision-title">Upload Ulang</div>
+      <input type="file" id="revisi_${esc(d.id_dokumen)}">
+      <button class="btn-mini btn-upload-ulang" onclick="revisiDokumen('${esc(d.id_dokumen)}')">Kirim File</button>
+    </div>`;
+  }
+  return `<tr><td>${esc(bidangName(d.id_bidang))}</td><td>${esc(kegiatanName(d.id_kegiatan))}</td><td>${esc(normalizeJenisDokumenLabel(d.jenis_dokumen))}</td><td>${d.url_file?`<a href="${esc(d.url_file)}" target="_blank">${esc(d.nama_file||'Buka file')}</a>`:esc(d.nama_file)}</td><td>${badge(d.status_verifikasi || 'MENUNGGU')}</td><td>${badge(getPencairanStatus(d.id_kegiatan))}</td><td><span class="upload-time">${esc(formatTanggalJam(d.tanggal_upload))}</span></td><td class="note-cell">${esc(d.catatan_Verifikator||'-')}</td><td>${aksi}</td></tr>`;
+}
+function addUploadRow(){
+  const wrap = document.getElementById("uploadRows");
+  const div = document.createElement("div");
+  div.className = "doc-upload-row";
+  div.innerHTML = `<div class="field"><label>Jenis Dokumen</label><select class="jenisDok">${docOptionsHtml("", document.getElementById("dokKegiatan")?.value || "")}</select></div><div class="field"><label>File Dokumen</label><input type="file" class="fileDok"></div><button class="btn-red" onclick="removeUploadRow(this)" type="button">Hapus</button>`;
+  wrap.appendChild(div);
+}
+function removeUploadRow(btn){ const rows = document.querySelectorAll(".doc-upload-row"); if(rows.length <= 1) return; btn.closest(".doc-upload-row").remove(); }
+async function updateBidang(id){
+  showLoading("Menyimpan bidang...");
+  try{
+    const r = await apiPost({action:"updateBidang", user:currentUser, id_bidang:id, pagu:toNumber(document.getElementById(`pagu_${id}`).value), status_akses:document.getElementById(`akses_${id}`).value});
+    alert(r.message);
+    if(r.success){ VerifikatorEditRows[id] = false; await loadDashboard(false); }
+  }catch(e){alert(e.message)}finally{hideLoading();}
+}
+async function savePerencanaan(){
+  if(!aksesPerencanaanTerbuka()){ alert("Akses perencanaan bidang sedang ditutup Verifikator. Menu pencairan tetap bisa digunakan."); return; }
+  showLoading("Mengajukan perencanaan...");
+  const data = {nama_kegiatan:document.getElementById("namaKegiatan").value, rincian_kebutuhan:"", keterangan:document.getElementById("keterangan").value, volume:toNumber(document.getElementById("volume").value), satuan:document.getElementById("satuan").value, harga_satuan:toNumber(document.getElementById("harga").value), metode_pemilihan:document.getElementById("metodePemilihan")?.value || "", waktu_pemilihan:document.getElementById("waktuPemilihan")?.value || ""};
+  if(!data.waktu_pemilihan){ hideLoading(); alert("Waktu pemilihan wajib diisi."); return; }
+  const jumlah = toNumber(data.volume) * toNumber(data.harga_satuan);
+  const cek = cekPaguFrontend(jumlah, "");
+  if(!cek.ok){ hideLoading(); alert(cek.message); return; }
+  try{ const r = await apiPost({action:"savePerencanaan", user:currentUser, data}); document.getElementById("saveMsg").innerText = r.message; if(!r.success) alert(r.message); if(r.success) await loadDashboard(false); }catch(e){ console.error(e); alert("Gagal menyimpan / memuat ulang data. Detail: " + String(e.message || e).slice(0, 300)); }finally{hideLoading();}
+}
+function openEditModal(id, mode){
+  const k = dashboard.perencanaan.find(x => String(x.id_kegiatan)===String(id)); if(!k) return;
+  if(isKegiatanLocked(k)){ alert("Kegiatan sudah selesai sampai validasi pencairan, perencanaan terkunci."); return; }
+  if(!aksesPerencanaanTerbuka()){ alert("Akses perencanaan bidang sedang ditutup Verifikator. Menu pencairan tetap bisa digunakan."); return; }
+  document.getElementById("editMode").value = mode; document.getElementById("editIdKegiatan").value = k.id_kegiatan;
+  document.getElementById("editNamaKegiatan").value = k.nama_kegiatan || ""; document.getElementById("editKeterangan").value = k.keterangan || ""; document.getElementById("editVolume").value = angkaID(k.volume); document.getElementById("editSatuan").value = k.satuan || ""; document.getElementById("editHarga").value = angkaID(k.harga_satuan); if(document.getElementById("editWaktuPemilihan")) document.getElementById("editWaktuPemilihan").value = /^\d{4}-\d{2}-\d{2}$/.test(String(k.waktu_pemilihan||"")) ? k.waktu_pemilihan : ""; document.getElementById("editAlasanPerubahan").value = "";
+  document.getElementById("editModalTitle").innerText = mode === "change" ? `Ajukan Perubahan Perencanaan` : "Edit Perencanaan";
+  document.getElementById("editModalSub").innerText = mode === "change" ? `Perubahan akan masuk sebagai Perubahan Ke-${toNumber(k.perubahan_ke)+1} dan menunggu Verifikator.` : "Data akan diajukan kembali ke Verifikator.";
+  document.getElementById("alasanPerubahanWrap").classList.toggle("hidden", mode !== "change");
+  setAutoTotal("editVolume","editHarga","editTotalPreview");
+  document.getElementById("editModal").classList.remove("hidden");
+}
+function closeEditModal(){ document.getElementById("editModal").classList.add("hidden"); }
+async function submitEditPerencanaan(){
+  showLoading("Menyimpan perubahan...");
+  const mode = document.getElementById("editMode").value;
+  const data = {id_kegiatan:document.getElementById("editIdKegiatan").value, mode, nama_kegiatan:document.getElementById("editNamaKegiatan").value, rincian_kebutuhan:"", keterangan:document.getElementById("editKeterangan").value, volume:toNumber(document.getElementById("editVolume").value), satuan:document.getElementById("editSatuan").value, harga_satuan:toNumber(document.getElementById("editHarga").value), alasan_perubahan:document.getElementById("editAlasanPerubahan").value};
+  const jumlah = toNumber(data.volume) * toNumber(data.harga_satuan);
+  const cek = cekPaguFrontend(jumlah, data.id_kegiatan);
+  if(!cek.ok){ hideLoading(); alert(cek.message); return; }
+  try{ const r = await apiPost({action:"updatePerencanaan", user:currentUser, data}); alert(r.message); if(r.success){ closeEditModal(); await loadDashboard(false); } }catch(e){alert(e.message)}finally{hideLoading();}
+}
+async function hapusPerencanaan(id){ const k=dashboard.perencanaan.find(x=>String(x.id_kegiatan)===String(id)); if(k && isKegiatanLocked(k)){ alert("Kegiatan sudah terkunci karena dokumen pencairan sudah divalidasi."); return; } if(!aksesPerencanaanTerbuka()){ alert("Akses perencanaan bidang sedang ditutup Verifikator."); return; } if(!confirm("Hapus perencanaan ini?")) return; showLoading("Menghapus..."); try{ const r = await apiPost({action:"deletePerencanaan", user:currentUser, id_kegiatan:id}); alert(r.message); if(r.success) await loadDashboard(false); }catch(e){alert(e.message)}finally{hideLoading();} }
+async function setujui(id){ showLoading("Menyetujui..."); try{ const r = await apiPost({action:"setujuiPerencanaan", user:currentUser, id_kegiatan:id}); alert(r.message); if(r.success) await loadDashboard(false); }catch(e){alert(e.message)}finally{hideLoading();} }
+async function tolak(id){ const catatan = prompt("Alasan penolakan wajib diisi:"); if(!catatan) return; showLoading("Menolak..."); try{ const r = await apiPost({action:"tolakPerencanaan", user:currentUser, id_kegiatan:id, catatan}); alert(r.message); if(r.success) await loadDashboard(false); }catch(e){alert(e.message)}finally{hideLoading();} }
+function fileToBase64(file){ return new Promise((resolve,reject)=>{ const reader=new FileReader(); reader.onload=()=>resolve(String(reader.result).split(',')[1]); reader.onerror=reject; reader.readAsDataURL(file); }); }
+async function uploadDokumen(){
+  const idKegiatan = document.getElementById("dokKegiatan")?.value; if(!idKegiatan){ alert("Pilih kegiatan dulu."); return; }
+  const rows = [...document.querySelectorAll(".doc-upload-row")];
+  const items = rows.map(row => ({jenis:row.querySelector(".jenisDok").value, file:row.querySelector(".fileDok").files[0]})).filter(x=>x.file);
+  if(!items.length){ alert("Pilih minimal 1 file dokumen."); return; }
+  showLoading(`Upload 1/${items.length} dokumen...`);
+  try{
+    for(let i=0;i<items.length;i++){
+      document.getElementById("loadingText").innerText = `Upload ${i+1}/${items.length} dokumen...`;
+      const base64 = await fileToBase64(items[i].file);
+      const r = await apiPost({action:"uploadDokumen", user:currentUser, id_kegiatan:idKegiatan, jenis_dokumen:items[i].jenis, file_name:items[i].file.name, mime_type:items[i].file.type, file_base64:base64});
+      if(!r.success) throw new Error(r.message);
+    }
+    alert("Dokumen berhasil diupload."); await loadDashboard(false);
+  }catch(e){ alert(e.message || "Gagal upload dokumen."); }
+  finally{ hideLoading(); }
+}
+async function verifDok(id, status){
+  showLoading("Verifikasi dokumen...");
+  try{
+    const r=await apiPost({action:"verifyDokumen", user:currentUser, id_dokumen:id, status_verifikasi:status, catatan_Verifikator:""});
+    alert(r.message); if(r.success) await loadDashboard(false);
+  }catch(e){alert(e.message)}finally{hideLoading();}
+}
+async function mintaPerbaikanDok(id){
+  const catatan = prompt("Alasan perbaikan dokumen wajib diisi:");
+  if(!catatan) return;
+  showLoading("Mengirim status perbaikan...");
+  try{
+    const r=await apiPost({action:"verifyDokumen", user:currentUser, id_dokumen:id, status_verifikasi:"PERBAIKAN", catatan_Verifikator:catatan});
+    alert(r.message); if(r.success) await loadDashboard(false);
+  }catch(e){alert(e.message)}finally{hideLoading();}
+}
+async function revisiDokumen(idDokumen){
+  const input = document.getElementById(`revisi_${idDokumen}`);
+  const file = input?.files?.[0];
+  if(!file){ alert("Pilih file pengganti terlebih dahulu."); return; }
+  showLoading("Upload ulang file dokumen...");
+  try{
+    const base64 = await fileToBase64(file);
+    const r = await apiPost({action:"revisiDokumen", user:currentUser, id_dokumen:idDokumen, file_name:file.name, mime_type:file.type, file_base64:base64});
+    alert(r.message); if(r.success) await loadDashboard(false);
+  }catch(e){ alert(e.message || "Gagal upload ulang file dokumen."); }
+  finally{ hideLoading(); }
+}
+async function updateCair(id, status){
+  // fungsi lama dibiarkan untuk kompatibilitas, tapi tombolnya sudah tidak ditampilkan
+  const cat = prompt("Catatan status pencairan (opsional):") || "";
+  showLoading("Update pencairan...");
+  try{ const r=await apiPost({action:"updateStatusPencairan", user:currentUser, id_kegiatan:id, status_pencairan:status, catatan_Verifikator:cat}); alert(r.message); if(r.success) await loadDashboard(false); }catch(e){alert(e.message)}finally{hideLoading();}
+}
+function logout(){ localStorage.removeItem("siporbo_user"); currentUser=null; dashboard=null; document.getElementById("appPage").classList.add("hidden"); document.getElementById("loginPage").classList.remove("hidden"); }
+window.onload = async function(){ const saved = localStorage.getItem("siporbo_user"); if(saved){ currentUser=JSON.parse(saved); activeMenu=isAdmin()?"Dashboard Monitoring":"Struktur Anggaran"; document.getElementById("loginPage").classList.add("hidden"); document.getElementById("appPage").classList.remove("hidden"); await loadDashboard(true); } };
+
+/* =========================
+   SIPORBO v11 behavior overrides
+   ========================= */
+function isPencairanComplete(idKegiatan){
+  const st = String(getPencairanStatus(idKegiatan) || "").toUpperCase();
+  if(["DOKUMEN LENGKAP","SIAP DICAIRKAN","SUDAH DICAIRKAN"].includes(st)) return true;
+  const docs = (dashboard?.dokumen || []).filter(d => String(d.id_kegiatan) === String(idKegiatan));
+  return docs.length > 0 && docs.every(d => String(d.status_verifikasi || "").toUpperCase() === "VALID");
+}
+function isKegiatanLocked(k){ return isPencairanComplete(k.id_kegiatan); }
+function getApprovedOpenKegiatan(){
+  return (dashboard?.perencanaan || []).filter(k =>
+    String(k.status_perencanaan || "").toUpperCase() === "DISETUJUI" && !isPencairanComplete(k.id_kegiatan)
+  );
+}
+function groupedDocs(){
+  const docs = dashboard?.dokumen || [];
+  const groups = {};
+  docs.forEach(d => {
+    const key = String(d.id_kegiatan || "");
+    if(!groups[key]){
+      const keg = (dashboard?.perencanaan || []).find(k => String(k.id_kegiatan) === key) || {};
+      groups[key] = {id_kegiatan:key, id_bidang:d.id_bidang || keg.id_bidang, kegiatan:keg, docs:[]};
+    }
+    groups[key].docs.push(d);
+  });
+  return Object.values(groups);
+}
+function groupDocStatus(g){
+  const docs = g.docs || [];
+  if(!docs.length) return "BELUM ADA DOKUMEN";
+  if(docs.some(d => ["PERBAIKAN","DITOLAK"].includes(String(d.status_verifikasi||"").toUpperCase()))) return "PERBAIKAN";
+  if(docs.every(d => String(d.status_verifikasi||"").toUpperCase() === "VALID")) return "VALID";
+  return "MENUNGGU";
+}
+function filterBarPencairan(){
+  return `<div class="filter-card"><div class="toolbar">${canSeeAll()?`<div class="field small"><label>Filter Bidang</label><select onchange="filters.cairBidang=this.value;pencairanPage=1;renderPencairan()">${bidangOptions(filters.cairBidang,true)}</select></div>`:""}<div class="field small"><label>Filter Status Dokumen</label><select onchange="filters.cairStatus=this.value;pencairanPage=1;renderPencairan()"><option value="ALL">Semua Status</option>${["MENUNGGU","VALID","PERBAIKAN"].map(s=>`<option value="${s}" ${filters.cairStatus===s?'selected':''}>${s}</option>`).join("")}</select></div><div class="field"><label>Search Nama Kegiatan</label><input value="${esc(filters.cairSearch)}" placeholder="Cari nama kegiatan..." oninput="filters.cairSearch=this.value;pencairanPage=1;renderPencairan()"></div><button class="btn-refresh" onclick="refreshData()">Refresh</button></div></div>`;
+}
+function renderPencairan(){
+  let html = "";
+  if(!canSeeAll()){
+    const approved = getApprovedOpenKegiatan();
+    html += `<section class="panel fade-up premium-panel collapsible-panel"><div class="panel-head"><div><h3>Upload Dokumen Pencairan</h3><p class="panel-sub">Satu kegiatan bisa upload lebih dari satu dokumen. Jenis dokumen sudah disesuaikan dengan SOP pengadaan melalui penyedia.</p></div>${collapseButton('uploadPencairan')}</div><div class="collapse-body ${collapseState.uploadPencairan?'hidden':''}"><div class="form-grid"><div class="field"><label>Pilih Kegiatan</label><select id="dokKegiatan" onchange="updateSaranDokumen()">${approved.map(k=>`<option value="${esc(k.id_kegiatan)}">${esc(k.nama_kegiatan)} - ${esc(k.metode_pemilihan || metodePemilihanByNilai(k.jumlah))}</option>`).join("")}</select><div id="saranDokumen" class="auto-doc-note-wrap"></div></div></div><div id="uploadRows"><div class="doc-upload-row"><div class="field"><label>Jenis Dokumen</label><select class="jenisDok">${docOptionsHtml("", approved[0]?.id_kegiatan || "")}</select></div><div class="field"><label>File Dokumen</label><input type="file" class="fileDok"></div><button class="btn-red" onclick="removeUploadRow(this)" type="button">Hapus</button></div></div><button class="btn-soft" onclick="addUploadRow()" type="button">+ Tambah File Dokumen</button> <button onclick="uploadDokumen()">Upload Semua Dokumen</button><div id="uploadMsg" class="msg">${approved.length?"":"Tidak ada kegiatan yang bisa diupload. Kegiatan harus DISETUJUI dan belum selesai validasi pencairan."}</div></div></section>`;
+  }
+
+  let groups = groupedDocs();
+  if(canSeeAll() && filters.cairBidang !== "ALL") groups = groups.filter(g => String(g.id_bidang)===filters.cairBidang);
+  if(filters.cairStatus !== "ALL") groups = groups.filter(g => groupDocStatus(g) === filters.cairStatus);
+  const q = filters.cairSearch.trim().toLowerCase();
+  if(q) groups = groups.filter(g => kegiatanName(g.id_kegiatan).toLowerCase().includes(q));
+  const pageData = groups.slice((pencairanPage-1)*perPage, pencairanPage*perPage);
+  const rows = pageData.map(g=>renderDokumenGroupRow(g)).join("");
+  html += `<section class="panel fade-up"><h3>Data Dokumen & Pencairan</h3><p class="panel-sub">${isAdmin()?"Rekap dokumen digabung per kegiatan agar validasi lebih gampang. Kalau dokumen masih kurang, klik Perbaikan dan isi alasan.":"Rekap dokumen digabung per kegiatan agar lebih jelas."}</p>${filterBarPencairan()}<div class="table-wrap grouped"><table class="group-table"><thead><tr><th>Rekap Kegiatan</th></tr></thead><tbody>${rows || `<tr><td class="empty">Belum ada dokumen</td></tr>`}</tbody></table></div>${pager(groups.length, pencairanPage, 'goPencairanPage')}</section>`;
+  document.getElementById("contentArea").innerHTML = html;
+}
+function effectivePencairanStatusV68(g){
+  const stored = String(getPencairanStatus(g.id_kegiatan) || '').toUpperCase();
+  const docs = g?.docs || [];
+  if(stored === 'SELESAI') return 'SELESAI';
+  if(!docs.length) return 'MENUNGGU DOKUMEN PENCAIRAN';
+  if(docs.some(isDocRepairV64)) return 'PERBAIKAN DOKUMEN';
+  if(docs.every(isDocValidV64)) return 'MENUNGGU FINALISASI';
+  if(docs.some(d => statusTextNormV64(d.status_verifikasi).includes('VERIFIKASI PERBAIKAN'))) return 'MENUNGGU VERIFIKASI PERBAIKAN DOKUMEN';
+  return 'MENUNGGU VERIFIKASI DOKUMEN';
+}
+function renderDokumenGroupRow(g){
+  const stGroup = groupDocStatus(g);
+  const stCair = effectivePencairanStatusV68(g);
+  const isCollapsed = docGroupCollapse[g.id_kegiatan] === undefined ? true : !!docGroupCollapse[g.id_kegiatan];
+  const docsHtml = (g.docs || []).map(d => {
+    const st = String(d.status_verifikasi || 'MENUNGGU').toUpperCase();
+    let rev = "";
+    if(!isAdmin() && (st === 'PERBAIKAN' || st === 'DITOLAK')){
+      rev = `<div class="doc-action-box"><input type="file" id="revisi_${esc(d.id_dokumen)}"><button class="btn-mini" onclick="revisiDokumen('${esc(d.id_dokumen)}')">Upload Revisi</button></div>`;
+    }
+    return `<div class="doc-item"><div><b>${esc(d.jenis_dokumen || '-')}</b><br><small class="muted">${esc(d.nama_file || '-')}</small></div><div>${d.url_file?`<a href="${esc(d.url_file)}" target="_blank">Buka File</a>`:esc(d.nama_file || '-')}</div><div>${badge(d.status_verifikasi || 'MENUNGGU')}</div><div>${d.catatan_Verifikator?`<div class="group-reason"><b>Catatan:</b> ${esc(d.catatan_Verifikator)}</div>`:rev || `<span class="muted">-</span>`}</div></div>`;
+  }).join("");
+  let actions = `<span class="muted">-</span>`;
+  if(isAdmin()){
+    actions = `<div class="group-actions"><button class="btn-mini btn-green btn-wide" onclick="validKegiatanDokumen('${esc(g.id_kegiatan)}')">Valid</button><button class="btn-mini btn-orange btn-wide" onclick="perbaikanKegiatanDokumen('${esc(g.id_kegiatan)}')">Perbaikan</button></div>`;
+  }
+  return `<tr><td class="doc-group-card"><div class="doc-group-head doc-group-head-v12"><div class="doc-group-title"><b>${esc(kegiatanName(g.id_kegiatan))}</b><small>${esc(g.id_kegiatan)}</small></div><div><small class="muted">Bidang</small><br><b>${esc(bidangName(g.id_bidang))}</b></div><div><small class="muted">Status Dokumen</small><br>${badge(stGroup)}</div><div><small class="muted">Status Pencairan</small><br>${badge(stCair)}</div><div class="doc-toggle-wrap"><button class="btn-mini btn-detail" onclick="toggleDocGroup('${esc(g.id_kegiatan)}')">${isCollapsed ? 'Lihat Rincian' : 'Minimize'}</button></div></div><div class="doc-list ${isCollapsed ? 'hidden' : ''}">${docsHtml}</div><div class="doc-group-head doc-group-foot-v12" style="border-top:1px solid #e8f1f7;border-bottom:0"><div class="group-reason"><b>Rekap:</b> ${(g.docs||[]).length} file dokumen. ${isCollapsed ? 'Klik Lihat Rincian untuk membuka daftar file.' : 'Rincian file sedang ditampilkan.'}</div><div></div><div></div><div></div>${actions}</div></td></tr>`;
+}
+function toggleDocGroup(id){ docGroupCollapse[id] = !(docGroupCollapse[id] === undefined ? true : docGroupCollapse[id]); renderPencairan(); }
+async function validKegiatanDokumen(idKegiatan){
+  const docs = (dashboard?.dokumen || []).filter(d => String(d.id_kegiatan) === String(idKegiatan));
+  if(!docs.length){ alert('Belum ada dokumen untuk kegiatan ini.'); return; }
+  showLoading('Memvalidasi dokumen kegiatan...');
+  try{
+    for(const d of docs){
+      if(String(d.status_verifikasi || '').toUpperCase() !== 'VALID'){
+        const r = await apiPost({action:'verifyDokumen', user:currentUser, id_dokumen:d.id_dokumen, status_verifikasi:'VALID', catatan_Verifikator:''});
+        if(!r.success) throw new Error(r.message);
+      }
+    }
+    alert('Dokumen kegiatan sudah dinyatakan valid.');
+    await loadDashboard(false);
+  }catch(e){ alert(e.message || 'Gagal validasi dokumen.'); }
+  finally{ hideLoading(); }
+}
+async function perbaikanKegiatanDokumen(idKegiatan){
+  const catatan = prompt('Alasan perbaikan dokumen wajib diisi:');
+  if(!catatan) return;
+  const docs = (dashboard?.dokumen || []).filter(d => String(d.id_kegiatan) === String(idKegiatan));
+  if(!docs.length){ alert('Belum ada dokumen untuk kegiatan ini.'); return; }
+  showLoading('Mengirim status perbaikan kegiatan...');
+  try{
+    for(const d of docs){
+      const r = await apiPost({action:'verifyDokumen', user:currentUser, id_dokumen:d.id_dokumen, status_verifikasi:'PERBAIKAN', catatan_Verifikator:catatan});
+      if(!r.success) throw new Error(r.message);
+    }
+    alert('Status perbaikan sudah dikirim ke bidang.');
+    await loadDashboard(false);
+  }catch(e){ alert(e.message || 'Gagal mengirim perbaikan.'); }
+  finally{ hideLoading(); }
+}
+function addUploadRow(){
+  const wrap = document.getElementById("uploadRows");
+  const div = document.createElement("div");
+  div.className = "doc-upload-row";
+  div.innerHTML = `<div class="field"><label>Jenis Dokumen</label><select class="jenisDok">${docOptionsHtml("", document.getElementById("dokKegiatan")?.value || "")}</select></div><div class="field"><label>File Dokumen</label><input type="file" class="fileDok"></div><button class="btn-red" onclick="removeUploadRow(this)" type="button">Hapus</button>`;
+  wrap.appendChild(div);
+}
+
+
+/* =========================
+   SIMPROV v38 final overrides
+   - Dokumen yang sudah pernah diupload tidak muncul lagi di dropdown upload awal.
+   - Kegiatan yang seluruh dokumen wajibnya sudah diupload tidak muncul lagi di dropdown Pilih Kegiatan.
+   - Upload ulang muncul per file yang statusnya PERBAIKAN/DITOLAK.
+   - Admin dapat validasi/perbaikan per file di rincian kegiatan.
+   ========================= */
+function docTypeKey(v){
+  return normalizeJenisDokumenLabel(String(v || ""))
+    .toUpperCase()
+    .replace(/\s+/g," ")
+    .trim();
+}
+function requiredDocTypesForKegiatan(k){
+  if(!k) return JENIS_DOKUMEN_SOP;
+  return dokumenKetentuanByNilai(k.jumlah || (toNumber(k.volume) * toNumber(k.harga_satuan)));
+}
+function uploadedDocTypesForKegiatan(idKegiatan){
+  return new Set((dashboard?.dokumen || [])
+    .filter(d => String(d.id_kegiatan) === String(idKegiatan))
+    .map(d => docTypeKey(d.jenis_dokumen)));
+}
+function remainingDocTypesForKegiatan(idKegiatan){
+  const k = kegiatanById(idKegiatan);
+  const required = requiredDocTypesForKegiatan(k);
+  const uploaded = uploadedDocTypesForKegiatan(idKegiatan);
+  return required.filter(x => !uploaded.has(docTypeKey(x)));
+}
+function kegiatanButuhUploadAwal(k){
+  if(!k) return false;
+  if(String(k.status_perencanaan || "").toUpperCase() !== "DISETUJUI") return false;
+  if(isPencairanComplete(k.id_kegiatan)) return false;
+  return remainingDocTypesForKegiatan(k.id_kegiatan).length > 0;
+}
+function getApprovedOpenKegiatan(){
+  return (dashboard?.perencanaan || []).filter(k => kegiatanButuhUploadAwal(k));
+}
+function docOptionsHtml(selected="", idKegiatan=""){
+  let list = idKegiatan ? remainingDocTypesForKegiatan(idKegiatan) : JENIS_DOKUMEN_SOP;
+  if(selected && !list.some(x => docTypeKey(x) === docTypeKey(selected))){
+    list = [selected, ...list];
+  }
+  if(!list.length){
+    return `<option value="" disabled selected>Semua dokumen wajib sudah diupload</option>`;
+  }
+  return list.map(x => `<option value="${esc(x)}" ${docTypeKey(x)===docTypeKey(selected)?'selected':''}>${esc(x)}</option>`).join("");
+}
+function updateSaranDokumen(){
+  const id = document.getElementById("dokKegiatan")?.value;
+  const box = document.getElementById("saranDokumen");
+  if(box) box.innerHTML = wajibDocNote(id);
+  document.querySelectorAll("#uploadRows .jenisDok").forEach(sel => {
+    const old = sel.value;
+    sel.innerHTML = docOptionsHtml(old, id);
+  });
+}
+function addUploadRow(){
+  const idKegiatan = document.getElementById("dokKegiatan")?.value || "";
+  if(idKegiatan && !remainingDocTypesForKegiatan(idKegiatan).length){
+    alert("Semua jenis dokumen wajib untuk kegiatan ini sudah diupload. Jika ada dokumen berstatus PERBAIKAN, gunakan tombol Upload Ulang pada rincian file.");
+    return;
+  }
+  const wrap = document.getElementById("uploadRows");
+  const div = document.createElement("div");
+  div.className = "doc-upload-row";
+  div.innerHTML = `<div class="field"><label>Jenis Dokumen</label><select class="jenisDok">${docOptionsHtml("", idKegiatan)}</select></div><div class="field"><label>File Dokumen</label><input type="file" class="fileDok"></div><button class="btn-red" onclick="removeUploadRow(this)" type="button">Hapus</button>`;
+  wrap.appendChild(div);
+}
+async function uploadDokumen(){
+  const idKegiatan = document.getElementById("dokKegiatan")?.value;
+  if(!idKegiatan){ alert("Tidak ada kegiatan yang bisa diupload. Jika dokumen berstatus PERBAIKAN, upload ulang dari rincian dokumen di bawah."); return; }
+  const rows = [...document.querySelectorAll(".doc-upload-row")];
+  const items = rows.map(row => ({jenis:row.querySelector(".jenisDok").value, file:row.querySelector(".fileDok").files[0]})).filter(x=>x.file);
+  if(!items.length){ alert("Pilih minimal 1 file dokumen."); return; }
+  const remainingKeys = new Set(remainingDocTypesForKegiatan(idKegiatan).map(docTypeKey));
+  for(const it of items){
+    if(!remainingKeys.has(docTypeKey(it.jenis))){
+      alert(`Jenis dokumen ${it.jenis} sudah pernah diupload. Jika perlu perbaikan, gunakan tombol Upload Ulang pada rincian file.`);
+      return;
+    }
+  }
+  showLoading(`Upload 1/${items.length} dokumen...`);
+  try{
+    for(let i=0;i<items.length;i++){
+      document.getElementById("loadingText").innerText = `Upload ${i+1}/${items.length} dokumen...`;
+      const base64 = await fileToBase64(items[i].file);
+      const r = await apiPost({action:"uploadDokumen", user:currentUser, id_kegiatan:idKegiatan, jenis_dokumen:items[i].jenis, file_name:items[i].file.name, mime_type:items[i].file.type, file_base64:base64});
+      if(!r.success) throw new Error(r.message);
+    }
+    alert("Dokumen berhasil diupload."); await loadDashboard(false);
+  }catch(e){ alert(e.message || "Gagal upload dokumen."); }
+  finally{ hideLoading(); }
+}
+function renderPencairan(){
+  let html = "";
+  if(!canSeeAll()){
+    const approved = getApprovedOpenKegiatan();
+    const firstId = approved[0]?.id_kegiatan || "";
+    html += `<section class="panel fade-up premium-panel collapsible-panel"><div class="panel-head"><div><h3>Upload Dokumen Pencairan</h3><p class="panel-sub">Satu kegiatan bisa upload lebih dari satu dokumen. Jenis dokumen yang sudah diupload tidak muncul lagi di pilihan upload awal.</p></div>${collapseButton('uploadPencairan')}</div><div class="collapse-body ${collapseState.uploadPencairan?'hidden':''}"><div class="form-grid"><div class="field"><label>Pilih Kegiatan</label><select id="dokKegiatan" onchange="updateSaranDokumen()">${approved.map(k=>`<option value="${esc(k.id_kegiatan)}">${esc(k.nama_kegiatan)} - ${esc(k.metode_pemilihan || metodePemilihanByNilai(k.jumlah))}</option>`).join("")}</select><div id="saranDokumen" class="auto-doc-note-wrap"></div></div></div><div id="uploadRows"><div class="doc-upload-row"><div class="field"><label>Jenis Dokumen</label><select class="jenisDok">${docOptionsHtml("", firstId)}</select></div><div class="field"><label>File Dokumen</label><input type="file" class="fileDok"></div><button class="btn-red" onclick="removeUploadRow(this)" type="button">Hapus</button></div></div><button class="btn-soft" onclick="addUploadRow()" type="button">+ Tambah File Dokumen</button> <button onclick="uploadDokumen()">Upload Semua Dokumen</button><div id="uploadMsg" class="msg">${approved.length?"":"Tidak ada dokumen baru yang perlu diupload. Jika ada file berstatus PERBAIKAN, gunakan tombol Upload Ulang pada rincian dokumen."}</div></div></section>`;
+  }
+
+  let groups = groupedDocs();
+  if(canSeeAll() && filters.cairBidang !== "ALL") groups = groups.filter(g => String(g.id_bidang)===filters.cairBidang);
+  if(filters.cairStatus !== "ALL") groups = groups.filter(g => groupDocStatus(g) === filters.cairStatus);
+  const q = filters.cairSearch.trim().toLowerCase();
+  if(q) groups = groups.filter(g => kegiatanName(g.id_kegiatan).toLowerCase().includes(q));
+  const pageData = groups.slice((pencairanPage-1)*perPage, pencairanPage*perPage);
+  const rows = pageData.map(g=>renderDokumenGroupRow(g)).join("");
+  html += `<section class="panel fade-up"><h3>Data Dokumen & Pencairan</h3><p class="panel-sub">${isAdmin()?"Rekap dokumen digabung per kegiatan. Verifikasi dapat dilakukan per file dokumen agar lebih akurat.":"Rekap dokumen digabung per kegiatan. File yang berstatus PERBAIKAN dapat diupload ulang pada rincian file."}</p>${filterBarPencairan()}<div class="table-wrap grouped-wrap"><table class="grouped-table"><thead><tr><th>Rekap Kegiatan</th></tr></thead><tbody>${rows || `<tr><td class="empty">Belum ada dokumen</td></tr>`}</tbody></table></div>${pager(groups.length, pencairanPage, 'goPencairanPage')}</section>`;
+  document.getElementById("contentArea").innerHTML = html;
+  if(!canSeeAll()) setTimeout(updateSaranDokumen, 0);
+}
+function renderDokumenGroupRow(g){
+  const stGroup = groupDocStatus(g);
+  const stCair = getPencairanStatus(g.id_kegiatan);
+  const isCollapsed = docGroupCollapse[g.id_kegiatan] === undefined ? false : !!docGroupCollapse[g.id_kegiatan];
+  const docsHtml = (g.docs || []).map(d => {
+    const st = String(d.status_verifikasi || 'MENUNGGU').toUpperCase();
+    let actionHtml = `<span class="muted">-</span>`;
+    if(canManage()){
+      actionHtml = `<div class="doc-file-actions"><button class="btn-mini btn-green" onclick="verifDok('${esc(d.id_dokumen)}','VALID')">Valid</button><button class="btn-mini btn-orange" onclick="mintaPerbaikanDok('${esc(d.id_dokumen)}')">Perbaikan</button></div>`;
+    } else if(isReviewer()){
+      actionHtml = `<span class="audit-pill">Read-only</span>`;
+    } else if(st === 'PERBAIKAN' || st === 'DITOLAK'){
+      actionHtml = `<div class="doc-action-box per-file-revision"><div class="revision-title">Upload Ulang</div><input type="file" id="revisi_${esc(d.id_dokumen)}"><button class="btn-mini btn-upload-ulang" onclick="revisiDokumen('${esc(d.id_dokumen)}')">Kirim File</button></div>`;
+    }
+    const catatan = d.catatan_Verifikator ? `<div class="group-reason"><b>Catatan:</b> ${esc(d.catatan_Verifikator)}</div>` : "";
+    return `<div class="doc-item ${st==='PERBAIKAN'||st==='DITOLAK'?'doc-item-repair':''}"><div><b>${esc(normalizeJenisDokumenLabel(d.jenis_dokumen) || '-')}</b><br><small class="muted">${esc(d.nama_file || '-')}</small></div><div>${d.url_file?`<a href="${esc(d.url_file)}" target="_blank">Buka File</a>`:esc(d.nama_file || '-')}</div><div>${badge(d.status_verifikasi || 'MENUNGGU')}</div><div>${catatan}${actionHtml}</div></div>`;
+  }).join("");
+  let actions = `<span class="muted">-</span>`;
+  if(isAdmin()){
+    actions = `<div class="group-actions"><button class="btn-mini btn-green btn-wide" onclick="validKegiatanDokumen('${esc(g.id_kegiatan)}')">Valid Semua</button><button class="btn-mini btn-orange btn-wide" onclick="perbaikanKegiatanDokumen('${esc(g.id_kegiatan)}')">Perbaikan Semua</button></div>`;
+  }
+  return `<tr><td class="doc-group-card"><div class="doc-group-head doc-group-head-v12"><div class="doc-group-title"><b>${esc(kegiatanName(g.id_kegiatan))}</b><small>${esc(g.id_kegiatan)}</small></div><div><small class="muted">Bidang</small><br><b>${esc(bidangName(g.id_bidang))}</b></div><div><small class="muted">Status Dokumen</small><br>${badge(stGroup)}</div><div><small class="muted">Status Pencairan</small><br>${badge(stCair)}</div><div class="doc-toggle-wrap"><button class="btn-mini btn-detail" onclick="toggleDocGroup('${esc(g.id_kegiatan)}')">${isCollapsed ? 'Lihat Rincian' : 'Minimize'}</button></div></div><div class="doc-list ${isCollapsed ? 'hidden' : ''}">${docsHtml}</div><div class="doc-group-head doc-group-foot-v12" style="border-top:1px solid #e8f1f7;border-bottom:0"><div class="group-reason"><b>Rekap:</b> ${(g.docs||[]).length} file dokumen. ${isCollapsed ? 'Klik Lihat Rincian untuk membuka daftar file.' : 'Rincian file sedang ditampilkan.'}</div><div></div><div></div><div></div>${actions}</div></td></tr>`;
+}
+
+
+/* =========================
+   SIMPROV v39 final override
+   Admin validasi/perbaikan per file dokumen, bukan tombol per kegiatan.
+   ========================= */
+function renderDokumenGroupRow(g){
+  const stGroup = groupDocStatus(g);
+  const stCair = getPencairanStatus(g.id_kegiatan);
+  const isCollapsed = docGroupCollapse[g.id_kegiatan] === undefined ? false : !!docGroupCollapse[g.id_kegiatan];
+
+  const docsHtml = (g.docs || []).map(d => {
+    const st = String(d.status_verifikasi || 'MENUNGGU').toUpperCase();
+    let actionHtml = `<span class="muted">-</span>`;
+
+    if(canManage()){
+      actionHtml = `<div class="doc-file-actions v39-file-actions">
+        <button class="btn-mini btn-green" onclick="verifDok('${esc(d.id_dokumen)}','VALID')">Valid</button>
+        <button class="btn-mini btn-orange" onclick="mintaPerbaikanDok('${esc(d.id_dokumen)}')">Perbaikan</button>
+      </div>`;
+    } else if(isReviewer()){
+      actionHtml = `<span class="audit-pill">Read-only</span>`;
+    } else if(st === 'PERBAIKAN' || st === 'DITOLAK'){
+      actionHtml = `<div class="doc-action-box per-file-revision">
+        <div class="revision-title">Upload Ulang</div>
+        <input type="file" id="revisi_${esc(d.id_dokumen)}">
+        <button class="btn-mini btn-upload-ulang" onclick="revisiDokumen('${esc(d.id_dokumen)}')">Kirim File</button>
+      </div>`;
+    }
+
+    const catatan = d.catatan_Verifikator ? `<div class="group-reason"><b>Catatan:</b> ${esc(d.catatan_Verifikator)}</div>` : "";
+    return `<div class="doc-item ${st==='PERBAIKAN'||st==='DITOLAK'?'doc-item-repair':''}">
+      <div><b>${esc(normalizeJenisDokumenLabel(d.jenis_dokumen) || '-')}</b><br><small class="muted">${esc(d.nama_file || '-')}</small></div>
+      <div>${d.url_file?`<a href="${esc(d.url_file)}" target="_blank">Buka File</a>`:esc(d.nama_file || '-')}</div>
+      <div>${badge(d.status_verifikasi || 'MENUNGGU')}</div>
+      <div class="doc-file-note-action">${catatan}${actionHtml}</div>
+    </div>`;
+  }).join("");
+
+  return `<tr><td class="doc-group-card">
+    <div class="doc-group-head doc-group-head-v12">
+      <div class="doc-group-title"><b>${esc(kegiatanName(g.id_kegiatan))}</b><small>${esc(g.id_kegiatan)}</small></div>
+      <div><small class="muted">Bidang</small><br><b>${esc(bidangName(g.id_bidang))}</b></div>
+      <div><small class="muted">Status Dokumen</small><br>${badge(stGroup)}</div>
+      <div><small class="muted">Status Pencairan</small><br>${badge(stCair)}</div>
+      <div class="doc-toggle-wrap"><button class="btn-mini btn-detail" onclick="toggleDocGroup('${esc(g.id_kegiatan)}')">${isCollapsed ? 'Lihat Rincian' : 'Minimize'}</button></div>
+    </div>
+    <div class="doc-list ${isCollapsed ? 'hidden' : ''}">${docsHtml}</div>
+    <div class="doc-group-head doc-group-foot-v12 v69-final-action" style="border-top:1px solid #e8f1f7;border-bottom:0">
+      <div class="group-reason"><b>Rekap:</b> ${(g.docs||[]).length} file dokumen. ${isCollapsed ? 'Klik Lihat Rincian untuk membuka daftar file.' : 'Validasi/perbaikan dilakukan pada masing-masing file dokumen.'}</div>
+      <div></div><div></div><div></div><span class="muted">-</span>
+    </div>
+  </td></tr>`;
+}
+
+
+/* =========================
+   SIMPROV v41 safety override
+   Mencegah dashboard gagal hanya karena 1 baris data perencanaan bermasalah.
+   ========================= */
+function renderPerencanaanRow(k){
+  try{
+    k = k || {};
+    const st = String(k.status_perencanaan||"DIAJUKAN").toUpperCase();
+    const locked = isKegiatanLocked(k);
+    const aksesBuka = aksesPerencanaanTerbuka();
+    const jumlah = toNumber(k.jumlah || (toNumber(k.volume)*toNumber(k.harga_satuan)));
+    const metode = k.metode_pemilihan || metodePemilihanByNilai(jumlah);
+    const waktu = k.waktu_pemilihan ? formatTanggalID(k.waktu_pemilihan) : "-";
+    const note = `${k.alasan_penolakan?`<div class="reason-box"><b>Catatan penyesuaian:</b><br>${esc(k.alasan_penolakan)}</div>`:""}${k.alasan_perubahan?`<div class="history-box"><b>Alasan perubahan:</b><br>${esc(k.alasan_perubahan)}</div>`:""}${k.riwayat_perubahan?`<div class="history-box"><b>Riwayat:</b><br>${esc(k.riwayat_perubahan).replace(/\n/g,'<br>')}</div>`:""}` || `<span class="muted">-</span>`;
+    let aksi = "";
+    if(canManage()){
+      if(st === "DIAJUKAN" || st === "PERUBAHAN_DIAJUKAN") aksi = `<button class="btn-mini btn-green" onclick="setujui('${esc(k.id_kegiatan)}')">Setujui</button><button class="btn-mini btn-orange" onclick="tolak('${esc(k.id_kegiatan)}')">Minta Perbaikan</button>`;
+      else aksi = `<span class="muted">-</span>`;
+    } else if(isReviewer()){
+      aksi = `<span class="audit-pill">Read-only</span>`;
+    } else if(locked){
+      aksi = `<span class="status-done-pill">Selesai</span>`;
+    } else if(!aksesBuka){
+      aksi = `<span class="lock-badge">Akses perencanaan ditutup</span>`;
+    } else {
+      if(st === "DIAJUKAN" || st === "DITOLAK") aksi = `<button class="btn-mini" onclick="openEditModal('${esc(k.id_kegiatan)}','normal')">Edit</button><button class="btn-mini btn-red" onclick="hapusPerencanaan('${esc(k.id_kegiatan)}')">Hapus</button>`;
+      else if(st === "DISETUJUI") aksi = `<button class="btn-mini btn-orange" onclick="openEditModal('${esc(k.id_kegiatan)}','change')">Ajukan Perubahan</button>`;
+      else aksi = `<span class="muted">Menunggu Verifikator</span>`;
+    }
+    const perubahan = toNumber(k.perubahan_ke) ? `<br><small class="muted">Perubahan Ke-${toNumber(k.perubahan_ke)}</small>` : "";
+    const rowClass = locked ? "row-selesai" : (st === "DITOLAK" ? "row-perbaikan" : "row-proses");
+    return `<tr class="rencana-row ${rowClass}">
+      <td>${esc(k.id_kegiatan)}</td>
+      <td>${esc(bidangName(k.id_bidang))}</td>
+      <td><b>${esc(k.nama_kegiatan)}</b>${perubahan}</td>
+      <td>${esc(k.volume)}</td>
+      <td>${esc(k.satuan)}</td>
+      <td>${rupiah(k.harga_satuan)}</td>
+      <td><b>${rupiah(jumlah)}</b></td>
+      <td>${esc(metode)}</td>
+      <td>${esc(waktu)}</td>
+      <td>${badge(st)}</td>
+      <td class="note-cell">${note}</td>
+      <td class="nowrap">${aksi}</td>
+    </tr>`;
+  }catch(e){
+    console.error("ROW_PERENCANAAN_ERROR", e, k);
+    return `<tr class="rencana-row row-perbaikan"><td colspan="12">Data kegiatan ${esc(k?.id_kegiatan || "-")} perlu dicek. Detail: ${esc(e.message || e)}</td></tr>`;
+  }
+}
+
+
+/* =========================
+   SIMPROV v43 final override
+   Hilangkan box info metode/waktu/dokumen pada menu pencairan.
+   Dropdown dokumen tetap otomatis mengikuti metode kegiatan.
+   ========================= */
+function updateSaranDokumen(){
+  const box = document.getElementById("saranDokumen");
+  if(box) box.innerHTML = "";
+  const id = document.getElementById("dokKegiatan")?.value || "";
+  document.querySelectorAll("#uploadRows .jenisDok").forEach(sel => {
+    const old = sel.value;
+    sel.innerHTML = docOptionsHtml(old, id);
+  });
+}
+
+
+/* =========================
+   SIMPROV v46 final override
+   Info dokumen lengkap: tanggal upload, tanggal verifikasi, tanggal perbaikan/upload ulang, catatan Verifikator, dan riwayat.
+   ========================= */
+function fmtDateTimeID(v){
+  if(!v) return "-";
+  try{
+    const d = new Date(v);
+    if(isNaN(d.getTime())) return esc(String(v));
+    return d.toLocaleString("id-ID", {day:"2-digit", month:"long", year:"numeric", hour:"2-digit", minute:"2-digit"}) + " WIB";
+  }catch(e){ return esc(String(v)); }
+}
+function docTimelineHtml(d){
+  const st = String(d.status_verifikasi || "MENUNGGU").toUpperCase();
+  const rows = [];
+  rows.push(`<div><span>Upload awal</span><b>${fmtDateTimeID(d.tanggal_upload)}</b>${d.upload_by ? `<small>oleh ${esc(d.upload_by)}</small>` : ""}</div>`);
+  if(d.tanggal_verifikasi){
+    rows.push(`<div><span>${st === "VALID" ? "Diverifikasi" : "Diperiksa Verifikator"}</span><b>${fmtDateTimeID(d.tanggal_verifikasi)}</b>${d.verifikasi_by ? `<small>oleh ${esc(d.verifikasi_by)}</small>` : ""}</div>`);
+  }
+  if(d.tanggal_revisi){
+    rows.push(`<div><span>Upload ulang</span><b>${fmtDateTimeID(d.tanggal_revisi)}</b>${d.revisi_by ? `<small>oleh ${esc(d.revisi_by)}</small>` : ""}</div>`);
+  }
+  if(d.catatan_Verifikator){
+    rows.push(`<div class="doc-Verifikator-note"><span>Catatan Verifikator</span><b>${esc(d.catatan_Verifikator)}</b></div>`);
+  }
+  if(d.riwayat_dokumen){
+    rows.push(`<div class="doc-history"><span>Riwayat</span><b>${esc(d.riwayat_dokumen).replace(/\n/g,"<br>")}</b></div>`);
+  }
+  return `<div class="doc-timeline">${rows.join("")}</div>`;
+}
+function renderDokumenGroupRow(g){
+  const stGroup = groupDocStatus(g);
+  const stCair = getPencairanStatus(g.id_kegiatan);
+  const isCollapsed = docGroupCollapse[g.id_kegiatan] === undefined ? false : !!docGroupCollapse[g.id_kegiatan];
+
+  const docsHtml = (g.docs || []).map(d => {
+    const st = String(d.status_verifikasi || 'MENUNGGU').toUpperCase();
+    let actionHtml = `<span class="muted">-</span>`;
+
+    if(canManage()){
+      actionHtml = `<div class="doc-file-actions v39-file-actions">
+        <button class="btn-mini btn-green" onclick="verifDok('${esc(d.id_dokumen)}','VALID')">Valid</button>
+        <button class="btn-mini btn-orange" onclick="mintaPerbaikanDok('${esc(d.id_dokumen)}')">Perbaikan</button>
+      </div>`;
+    } else if(isReviewer()){
+      actionHtml = `<span class="audit-pill">Read-only</span>`;
+    } else if(st === 'PERBAIKAN' || st === 'DITOLAK'){
+      actionHtml = `<div class="doc-action-box per-file-revision compact-revision">
+        <div class="revision-title">Upload Ulang</div>
+        <input type="file" id="revisi_${esc(d.id_dokumen)}">
+        <button class="btn-mini btn-upload-ulang" onclick="revisiDokumen('${esc(d.id_dokumen)}')">Kirim File</button>
+      </div>`;
+    }
+
+    return `<div class="doc-item doc-item-v46 ${st==='PERBAIKAN'||st==='DITOLAK'?'doc-item-repair':''}">
+      <div class="doc-main-info">
+        <b>${esc(normalizeJenisDokumenLabel(d.jenis_dokumen) || '-')}</b>
+        <small class="muted">${esc(d.nama_file || '-')}</small>
+      </div>
+      <div class="doc-link">${d.url_file?`<a href="${esc(d.url_file)}" target="_blank">Buka File</a>`:esc(d.nama_file || '-')}</div>
+      <div class="doc-status">${badge(d.status_verifikasi || 'MENUNGGU')}</div>
+      <div class="doc-file-note-action">${docTimelineHtml(d)}${actionHtml}</div>
+    </div>`;
+  }).join("");
+
+  return `<tr><td class="doc-group-card">
+    <div class="doc-group-head doc-group-head-v12">
+      <div class="doc-group-title"><b>${esc(kegiatanName(g.id_kegiatan))}</b><small>${esc(g.id_kegiatan)}</small></div>
+      <div><small class="muted">Bidang</small><br><b>${esc(bidangName(g.id_bidang))}</b></div>
+      <div><small class="muted">Status Dokumen</small><br>${badge(stGroup)}</div>
+      <div><small class="muted">Status Pencairan</small><br>${badge(stCair)}</div>
+      <div class="doc-toggle-wrap"><button class="btn-mini btn-detail" onclick="toggleDocGroup('${esc(g.id_kegiatan)}')">${isCollapsed ? 'Lihat Rincian' : 'Minimize'}</button></div>
+    </div>
+    <div class="doc-list ${isCollapsed ? 'hidden' : ''}">${docsHtml}</div>
+    <div class="doc-group-head doc-group-foot-v12 v69-final-action" style="border-top:1px solid #e8f1f7;border-bottom:0">
+      <div class="group-reason"><b>Rekap:</b> ${(g.docs||[]).length} file dokumen. ${isCollapsed ? 'Klik Lihat Rincian untuk membuka daftar file.' : 'Setiap file menampilkan riwayat upload, verifikasi, perbaikan, dan catatan Verifikator.'}</div>
+      <div></div><div></div><div></div><span class="muted">-</span>
+    </div>
+  </td></tr>`;
+}
+
+
+/* =========================
+   SIMPROV v47 final override
+   Status/riwayat dokumen ditampilkan sebagai popup, bukan penuh di tabel.
+   ========================= */
+function openDocStatusModal(idDokumen){
+  const d = (dashboard?.dokumen || []).find(x => String(x.id_dokumen) === String(idDokumen));
+  if(!d){ alert("Data dokumen tidak ditemukan."); return; }
+
+  const st = String(d.status_verifikasi || "MENUNGGU").toUpperCase();
+  const rows = [];
+
+  rows.push(`
+    <div class="status-row">
+      <div class="status-no">1.</div>
+      <div>
+        <b>Upload awal</b>
+        <p><b>Tanggal:</b> ${fmtDateTimeID(d.tanggal_upload)}</p>
+        <p><b>Oleh:</b> ${esc(d.upload_by || "-")}</p>
+        <p><b>File:</b> ${d.url_file ? `<a href="${esc(d.url_file)}" target="_blank">${esc(d.nama_file || "Buka file")}</a>` : esc(d.nama_file || "-")}</p>
+      </div>
+    </div>
+  `);
+
+  if(d.tanggal_verifikasi || d.catatan_Verifikator){
+    rows.push(`
+      <div class="status-row">
+        <div class="status-no">2.</div>
+        <div>
+          <b>${st === "VALID" ? "Verifikasi dokumen" : "Hasil pemeriksaan dokumen"}</b>
+          <p><b>Status:</b> ${esc(st)}</p>
+          <p><b>Tanggal:</b> ${fmtDateTimeID(d.tanggal_verifikasi)}</p>
+          <p><b>Admin:</b> ${esc(d.verifikasi_by || "-")}</p>
+          ${d.catatan_Verifikator ? `<p><b>Catatan:</b> ${esc(d.catatan_Verifikator)}</p>` : ""}
+        </div>
+      </div>
+    `);
+  }
+
+  if(d.tanggal_revisi){
+    rows.push(`
+      <div class="status-row">
+        <div class="status-no">3.</div>
+        <div>
+          <b>Upload ulang / perbaikan file</b>
+          <p><b>Tanggal:</b> ${fmtDateTimeID(d.tanggal_revisi)}</p>
+          <p><b>Oleh:</b> ${esc(d.revisi_by || "-")}</p>
+          <p><b>File terbaru:</b> ${d.url_file ? `<a href="${esc(d.url_file)}" target="_blank">${esc(d.nama_file || "Buka file")}</a>` : esc(d.nama_file || "-")}</p>
+        </div>
+      </div>
+    `);
+  }
+
+  if(d.riwayat_dokumen){
+    rows.push(`
+      <div class="status-row">
+        <div class="status-no">R.</div>
+        <div>
+          <b>Riwayat Dokumen</b>
+          <p>${esc(d.riwayat_dokumen).replace(/\n/g,"<br>")}</p>
+        </div>
+      </div>
+    `);
+  }
+
+  const html = `
+    <div class="status-modal-backdrop" id="docStatusModal" onclick="if(event.target.id==='docStatusModal') closeDocStatusModal()">
+      <div class="status-modal-card">
+        <div class="status-modal-head">
+          <h3>Status Dokumen</h3>
+          <button type="button" onclick="closeDocStatusModal()">Tutup</button>
+        </div>
+        <div class="status-modal-body">
+          <div class="status-doc-title">
+            <b>${esc(normalizeJenisDokumenLabel(d.jenis_dokumen) || "-")}</b>
+            <span>${esc(kegiatanName(d.id_kegiatan))}</span>
+          </div>
+          ${rows.join("")}
+        </div>
+      </div>
+    </div>
+  `;
+
+  const old = document.getElementById("docStatusModal");
+  if(old) old.remove();
+  document.body.insertAdjacentHTML("beforeend", html);
+}
+function closeDocStatusModal(){
+  const el = document.getElementById("docStatusModal");
+  if(el) el.remove();
+}
+function renderDokumenGroupRow(g){
+  const stGroup = groupDocStatus(g);
+  const stCair = getPencairanStatus(g.id_kegiatan);
+  const isCollapsed = docGroupCollapse[g.id_kegiatan] === undefined ? false : !!docGroupCollapse[g.id_kegiatan];
+
+  const docsHtml = (g.docs || []).map(d => {
+    const st = String(d.status_verifikasi || 'MENUNGGU').toUpperCase();
+    let actionHtml = `<span class="muted">-</span>`;
+
+    if(canManage()){
+      actionHtml = `<div class="doc-file-actions v39-file-actions">
+        <button class="btn-mini btn-green" onclick="verifDok('${esc(d.id_dokumen)}','VALID')">Valid</button>
+        <button class="btn-mini btn-orange" onclick="mintaPerbaikanDok('${esc(d.id_dokumen)}')">Perbaikan</button>
+      </div>`;
+    } else if(isReviewer()){
+      actionHtml = `<span class="audit-pill">Read-only</span>`;
+    } else if(st === 'PERBAIKAN' || st === 'DITOLAK'){
+      actionHtml = `<div class="doc-action-box per-file-revision compact-revision">
+        <div class="revision-title">Upload Ulang</div>
+        <input type="file" id="revisi_${esc(d.id_dokumen)}">
+        <button class="btn-mini btn-upload-ulang" onclick="revisiDokumen('${esc(d.id_dokumen)}')">Kirim File</button>
+      </div>`;
+    }
+
+    return `<div class="doc-item doc-item-v47 ${st==='PERBAIKAN'||st==='DITOLAK'?'doc-item-repair':''}">
+      <div class="doc-main-info">
+        <b>${esc(normalizeJenisDokumenLabel(d.jenis_dokumen) || '-')}</b>
+        <small class="muted">${esc(d.nama_file || '-')}</small>
+      </div>
+      <div class="doc-link">${d.url_file?`<a href="${esc(d.url_file)}" target="_blank">Buka File</a>`:esc(d.nama_file || '-')}</div>
+      <div class="doc-status">${badge(d.status_verifikasi || 'MENUNGGU')}</div>
+      <div class="doc-file-note-action compact-status-action">
+        <button class="btn-mini btn-detail" onclick="openDocStatusModal('${esc(d.id_dokumen)}')">Lihat Status</button>
+        ${d.catatan_Verifikator ? `<span class="doc-alert-text">Ada catatan Verifikator</span>` : ""}
+        ${actionHtml}
+      </div>
+    </div>`;
+  }).join("");
+
+  return `<tr><td class="doc-group-card">
+    <div class="doc-group-head doc-group-head-v12">
+      <div class="doc-group-title"><b>${esc(kegiatanName(g.id_kegiatan))}</b><small>${esc(g.id_kegiatan)}</small></div>
+      <div><small class="muted">Bidang</small><br><b>${esc(bidangName(g.id_bidang))}</b></div>
+      <div><small class="muted">Status Dokumen</small><br>${badge(stGroup)}</div>
+      <div><small class="muted">Status Pencairan</small><br>${badge(stCair)}</div>
+      <div class="doc-toggle-wrap"><button class="btn-mini btn-detail" onclick="toggleDocGroup('${esc(g.id_kegiatan)}')">${isCollapsed ? 'Lihat Rincian' : 'Minimize'}</button></div>
+    </div>
+    <div class="doc-list ${isCollapsed ? 'hidden' : ''}">${docsHtml}</div>
+    <div class="doc-group-head doc-group-foot-v12 v69-final-action" style="border-top:1px solid #e8f1f7;border-bottom:0">
+      <div class="group-reason"><b>Rekap:</b> ${(g.docs||[]).length} file dokumen. ${isCollapsed ? 'Klik Lihat Rincian untuk membuka daftar file.' : 'Status dan riwayat dokumen dapat dilihat melalui tombol Lihat Status.'}</div>
+      <div></div><div></div><div></div><span class="muted">-</span>
+    </div>
+  </td></tr>`;
+}
+
+
+/* =========================
+   SIMPROV v48 final override
+   - Popup dokumen menampilkan posisi saat ini.
+   - Label Admin diganti menjadi Verifikator.
+   - Alasan/Riwayat perencanaan dibuat tombol Lihat dan popup.
+   ========================= */
+function getDocPosisiSaatIni(d){
+  const st = String(d?.status_verifikasi || "MENUNGGU").toUpperCase();
+  if(st === "VALID") return "Sudah diverifikasi";
+  if(st === "PERBAIKAN" || st === "DITOLAK") return "Perlu perbaikan";
+  if(st === "MENUNGGU" && d?.tanggal_revisi) return "Menunggu verifikasi perbaikan";
+  return "Menunggu verifikasi";
+}
+function getRencanaPosisiSaatIni(k){
+  const st = String(k?.status_perencanaan || "DIAJUKAN").toUpperCase();
+  if(isKegiatanLocked(k)) return "Selesai";
+  if(st === "DISETUJUI") return "Disetujui";
+  if(st === "DITOLAK") return "Perlu perbaikan";
+  if(st === "PERUBAHAN_DIAJUKAN") return "Menunggu verifikasi perubahan";
+  if(st === "DIAJUKAN") return "Menunggu verifikasi perencanaan";
+  return st.replace(/_/g, " ");
+}
+function openDocStatusModal(idDokumen){
+  const d = (dashboard?.dokumen || []).find(x => String(x.id_dokumen) === String(idDokumen));
+  if(!d){ alert("Data dokumen tidak ditemukan."); return; }
+
+  const st = String(d.status_verifikasi || "MENUNGGU").toUpperCase();
+  const posisi = getDocPosisiSaatIni(d);
+  const rows = [];
+
+  rows.push(`
+    <div class="status-row status-position-row">
+      <div class="status-no">✓</div>
+      <div>
+        <b>Posisi Saat Ini</b>
+        <p><span class="status-position-text ${st === "VALID" ? "pos-valid" : (st === "PERBAIKAN" || st === "DITOLAK" ? "pos-repair" : "pos-wait")}">${esc(posisi)}</span></p>
+      </div>
+    </div>
+  `);
+
+  rows.push(`
+    <div class="status-row">
+      <div class="status-no">1.</div>
+      <div>
+        <b>Upload awal</b>
+        <p><b>Tanggal:</b> ${fmtDateTimeID(d.tanggal_upload)}</p>
+        <p><b>Oleh:</b> ${esc(d.upload_by || "-")}</p>
+        <p><b>File:</b> ${d.url_file ? `<a href="${esc(d.url_file)}" target="_blank">${esc(d.nama_file || "Buka file")}</a>` : esc(d.nama_file || "-")}</p>
+      </div>
+    </div>
+  `);
+
+  if(d.tanggal_verifikasi || d.catatan_Verifikator || st === "VALID" || st === "PERBAIKAN" || st === "DITOLAK"){
+    rows.push(`
+      <div class="status-row">
+        <div class="status-no">2.</div>
+        <div>
+          <b>${st === "VALID" ? "Verifikasi dokumen" : "Hasil pemeriksaan dokumen"}</b>
+          <p><b>Status:</b> ${esc(posisi)}</p>
+          <p><b>Tanggal:</b> ${fmtDateTimeID(d.tanggal_verifikasi)}</p>
+          <p><b>Verifikator:</b> ${esc(d.verifikasi_by || "-")}</p>
+          ${d.catatan_Verifikator ? `<p><b>Catatan:</b> ${esc(d.catatan_Verifikator)}</p>` : ""}
+        </div>
+      </div>
+    `);
+  }
+
+  if(d.tanggal_revisi){
+    rows.push(`
+      <div class="status-row">
+        <div class="status-no">3.</div>
+        <div>
+          <b>Upload ulang / perbaikan file</b>
+          <p><b>Tanggal:</b> ${fmtDateTimeID(d.tanggal_revisi)}</p>
+          <p><b>Oleh:</b> ${esc(d.revisi_by || "-")}</p>
+          <p><b>Status:</b> ${esc(posisi)}</p>
+          <p><b>File terbaru:</b> ${d.url_file ? `<a href="${esc(d.url_file)}" target="_blank">${esc(d.nama_file || "Buka file")}</a>` : esc(d.nama_file || "-")}</p>
+        </div>
+      </div>
+    `);
+  }
+
+  if(d.riwayat_dokumen){
+    rows.push(`
+      <div class="status-row">
+        <div class="status-no">R.</div>
+        <div>
+          <b>Riwayat Dokumen</b>
+          <p>${esc(d.riwayat_dokumen).replace(/\bADMIN\b/g,"Verifikator").replace(/\bAdmin\b/g,"Verifikator").replace(/\n/g,"<br>")}</p>
+        </div>
+      </div>
+    `);
+  }
+
+  const html = `
+    <div class="status-modal-backdrop" id="docStatusModal" onclick="if(event.target.id==='docStatusModal') closeDocStatusModal()">
+      <div class="status-modal-card">
+        <div class="status-modal-head">
+          <h3>Status Dokumen</h3>
+          <button type="button" onclick="closeDocStatusModal()">Tutup</button>
+        </div>
+        <div class="status-modal-body">
+          <div class="status-doc-title">
+            <b>${esc(normalizeJenisDokumenLabel(d.jenis_dokumen) || "-")}</b>
+            <span>${esc(kegiatanName(d.id_kegiatan))}</span>
+          </div>
+          ${rows.join("")}
+        </div>
+      </div>
+    </div>
+  `;
+
+  const old = document.getElementById("docStatusModal");
+  if(old) old.remove();
+  document.body.insertAdjacentHTML("beforeend", html);
+}
+function closeRencanaStatusModal(){
+  const el = document.getElementById("rencanaStatusModal");
+  if(el) el.remove();
+}
+function openRencanaStatusModal(idKegiatan){
+  const k = (dashboard?.perencanaan || []).find(x => String(x.id_kegiatan) === String(idKegiatan));
+  if(!k){ alert("Data perencanaan tidak ditemukan."); return; }
+  const st = String(k.status_perencanaan || "DIAJUKAN").toUpperCase();
+  const posisi = getRencanaPosisiSaatIni(k);
+  const jumlah = toNumber(k.jumlah || (toNumber(k.volume)*toNumber(k.harga_satuan)));
+  const rows = [];
+
+  rows.push(`
+    <div class="status-row status-position-row">
+      <div class="status-no">✓</div>
+      <div>
+        <b>Posisi Saat Ini</b>
+        <p><span class="status-position-text ${st === "DISETUJUI" ? "pos-valid" : (st === "DITOLAK" ? "pos-repair" : "pos-wait")}">${esc(posisi)}</span></p>
+      </div>
+    </div>
+  `);
+
+  rows.push(`
+    <div class="status-row">
+      <div class="status-no">1.</div>
+      <div>
+        <b>Data Perencanaan</b>
+        <p><b>Nama kegiatan:</b> ${esc(k.nama_kegiatan || "-")}</p>
+        <p><b>Bidang:</b> ${esc(bidangName(k.id_bidang))}</p>
+        <p><b>Jumlah:</b> ${rupiah(jumlah)}</p>
+        <p><b>Metode:</b> ${esc(k.metode_pemilihan || metodePemilihanByNilai(jumlah))}</p>
+        <p><b>Waktu Pemilihan:</b> ${esc(k.waktu_pemilihan ? formatTanggalID(k.waktu_pemilihan) : "-")}</p>
+        <p><b>Tanggal Input:</b> ${fmtDateTimeID(k.tanggal_input)}</p>
+      </div>
+    </div>
+  `);
+
+  if(k.alasan_penolakan){
+    rows.push(`
+      <div class="status-row">
+        <div class="status-no">2.</div>
+        <div>
+          <b>Catatan Penyesuaian</b>
+          <p>${esc(k.alasan_penolakan)}</p>
+        </div>
+      </div>
+    `);
+  }
+
+  if(k.alasan_perubahan || toNumber(k.perubahan_ke)){
+    rows.push(`
+      <div class="status-row">
+        <div class="status-no">3.</div>
+        <div>
+          <b>Pengajuan Perubahan</b>
+          <p><b>Perubahan:</b> ${toNumber(k.perubahan_ke) ? `Perubahan Ke-${toNumber(k.perubahan_ke)}` : "-"}</p>
+          ${k.alasan_perubahan ? `<p><b>Alasan perubahan:</b> ${esc(k.alasan_perubahan)}</p>` : ""}
+        </div>
+      </div>
+    `);
+  }
+
+  if(k.riwayat_perubahan){
+    rows.push(`
+      <div class="status-row">
+        <div class="status-no">R.</div>
+        <div>
+          <b>Riwayat Perubahan</b>
+          <p>${esc(k.riwayat_perubahan).replace(/\bADMIN\b/g,"Verifikator").replace(/\bAdmin\b/g,"Verifikator").replace(/\n/g,"<br>")}</p>
+        </div>
+      </div>
+    `);
+  }
+
+  if(rows.length <= 2 && !k.alasan_penolakan && !k.alasan_perubahan && !k.riwayat_perubahan){
+    rows.push(`
+      <div class="status-row">
+        <div class="status-no">-</div>
+        <div>
+          <b>Catatan / Riwayat</b>
+          <p>Belum terdapat catatan penyesuaian atau riwayat perubahan.</p>
+        </div>
+      </div>
+    `);
+  }
+
+  const html = `
+    <div class="status-modal-backdrop" id="rencanaStatusModal" onclick="if(event.target.id==='rencanaStatusModal') closeRencanaStatusModal()">
+      <div class="status-modal-card">
+        <div class="status-modal-head">
+          <h3>Status Perencanaan</h3>
+          <button type="button" onclick="closeRencanaStatusModal()">Tutup</button>
+        </div>
+        <div class="status-modal-body">
+          <div class="status-doc-title">
+            <b>${esc(k.nama_kegiatan || "-")}</b>
+            <span>${esc(k.id_kegiatan || "-")}</span>
+          </div>
+          ${rows.join("")}
+        </div>
+      </div>
+    </div>
+  `;
+  const old = document.getElementById("rencanaStatusModal");
+  if(old) old.remove();
+  document.body.insertAdjacentHTML("beforeend", html);
+}
+function renderPerencanaanRow(k){
+  try{
+    k = k || {};
+    const st = String(k.status_perencanaan||"DIAJUKAN").toUpperCase();
+    const locked = isKegiatanLocked(k);
+    const aksesBuka = aksesPerencanaanTerbuka();
+    const jumlah = toNumber(k.jumlah || (toNumber(k.volume)*toNumber(k.harga_satuan)));
+    const metode = k.metode_pemilihan || metodePemilihanByNilai(jumlah);
+    const waktu = k.waktu_pemilihan ? formatTanggalID(k.waktu_pemilihan) : "-";
+    const hasNote = !!(k.alasan_penolakan || k.alasan_perubahan || k.riwayat_perubahan || toNumber(k.perubahan_ke));
+    const note = `<button class="btn-mini btn-detail" onclick="openRencanaStatusModal('${esc(k.id_kegiatan)}')">${hasNote ? "Lihat Riwayat" : "Lihat"}</button>`;
+    let aksi = "";
+    if(canManage()){
+      if(st === "DIAJUKAN" || st === "PERUBAHAN_DIAJUKAN") aksi = `<button class="btn-mini btn-green" onclick="setujui('${esc(k.id_kegiatan)}')">Setujui</button><button class="btn-mini btn-orange" onclick="tolak('${esc(k.id_kegiatan)}')">Minta Perbaikan</button>`;
+      else aksi = `<span class="muted">-</span>`;
+    } else if(isReviewer()){
+      aksi = `<span class="audit-pill">Read-only</span>`;
+    } else if(locked){
+      aksi = `<span class="status-done-pill">Selesai</span>`;
+    } else if(!aksesBuka){
+      aksi = `<span class="lock-badge">Akses perencanaan ditutup</span>`;
+    } else {
+      if(st === "DIAJUKAN" || st === "DITOLAK") aksi = `<button class="btn-mini" onclick="openEditModal('${esc(k.id_kegiatan)}','normal')">Edit</button><button class="btn-mini btn-red" onclick="hapusPerencanaan('${esc(k.id_kegiatan)}')">Hapus</button>`;
+      else if(st === "DISETUJUI") aksi = `<button class="btn-mini btn-orange" onclick="openEditModal('${esc(k.id_kegiatan)}','change')">Ajukan Perubahan</button>`;
+      else aksi = `<span class="muted">Menunggu Verifikator</span>`;
+    }
+    const perubahan = toNumber(k.perubahan_ke) ? `<br><small class="muted">Perubahan Ke-${toNumber(k.perubahan_ke)}</small>` : "";
+    const rowClass = locked ? "row-selesai" : (st === "DITOLAK" ? "row-perbaikan" : "row-proses");
+    return `<tr class="rencana-row ${rowClass}">
+      <td>${esc(k.id_kegiatan)}</td>
+      <td>${esc(bidangName(k.id_bidang))}</td>
+      <td><b>${esc(k.nama_kegiatan)}</b>${perubahan}</td>
+      <td>${esc(k.volume)}</td>
+      <td>${esc(k.satuan)}</td>
+      <td>${rupiah(k.harga_satuan)}</td>
+      <td><b>${rupiah(jumlah)}</b></td>
+      <td>${esc(metode)}</td>
+      <td>${esc(waktu)}</td>
+      <td>${badge(st)}</td>
+      <td class="note-cell note-cell-popup">${note}</td>
+      <td class="nowrap">${aksi}</td>
+    </tr>`;
+  }catch(e){
+    console.error("ROW_PERENCANAAN_ERROR", e, k);
+    return `<tr class="rencana-row row-perbaikan"><td colspan="12">Data kegiatan ${esc(k?.id_kegiatan || "-")} perlu dicek. Detail: ${esc(e.message || e)}</td></tr>`;
+  }
+}
+
+
+/* =========================
+   SIMPROV v49 final override
+   - Status perencanaan setelah perbaikan menjadi "Menunggu verifikasi perbaikan".
+   - Menu admin Struktur Anggaran dirapikan.
+   - Admin dapat menambahkan bidang dari menu Struktur Anggaran.
+   ========================= */
+const adminEditRowsV49 = {};
+function setAdminEditRow(id, val){ adminEditRowsV49[String(id)] = !!val; renderStruktur(); }
+
+function getRencanaPosisiSaatIni(k){
+  const st = String(k?.status_perencanaan || "DIAJUKAN").toUpperCase();
+  const hasPerbaikan = !!(k?.alasan_penolakan || String(k?.riwayat_perubahan || "").toLowerCase().includes("perbaikan diajukan ulang"));
+  if(isKegiatanLocked(k)) return "Selesai";
+  if(st === "DISETUJUI") return "Disetujui";
+  if(st === "DITOLAK") return "Perlu perbaikan";
+  if(st === "PERUBAHAN_DIAJUKAN") return "Menunggu verifikasi perubahan";
+  if(st === "DIAJUKAN" && hasPerbaikan) return "Menunggu verifikasi perbaikan";
+  if(st === "DIAJUKAN") return "Menunggu verifikasi perencanaan";
+  return st.replace(/_/g, " ");
+}
+
+function renderStruktur(){
+  if(canManage()){
+    const rows = (dashboard.rekap || []).map(r=>{
+      const id = String(r.id_bidang);
+      const editing = !!adminEditRowsV49[id];
+      const paguView = angkaID(r.pagu);
+      return `<div class="admin-budget-card ${editing?'editing':''}">
+        <div class="admin-budget-info">
+          <b>${esc(r.nama_bidang)}</b>
+          <small>${esc(r.id_bidang)}</small>
+          <span>Total Perencanaan: <b>${rupiah(r.total_perencanaan)}</b></span>
+          <span>Sisa Pagu: <b>${rupiah(r.sisa_pagu)}</b></span>
+        </div>
+        <div class="field">
+          <label>Pagu Bidang</label>
+          ${editing?`<input id="pagu_${esc(r.id_bidang)}" inputmode="numeric" value="${paguView}" oninput="onPaguAdminInput(this)">`:`<div class="readonly-display">Rp ${paguView}</div>`}
+        </div>
+        <div class="field">
+          <label>Akses Input</label>
+          ${editing?`<select id="akses_${esc(r.id_bidang)}"><option value="BUKA" ${r.status_akses==='BUKA'?'selected':''}>BUKA</option><option value="TUTUP" ${r.status_akses==='TUTUP'?'selected':''}>TUTUP</option></select>`:`<div class="readonly-display">${esc(r.status_akses || '-')}</div>`}
+        </div>
+        <div class="admin-budget-status">${badge(r.status_progress)}</div>
+        <div class="admin-budget-actions">${editing?`<button onclick="updateBidang('${esc(r.id_bidang)}')">Simpan</button><button class="btn-soft" onclick="setAdminEditRow('${esc(r.id_bidang)}', false)">Batal</button>`:`<button class="btn-mini" onclick="setAdminEditRow('${esc(r.id_bidang)}', true)">Edit</button>`}</div>
+      </div>`;
+    }).join("");
+    document.getElementById("contentArea").innerHTML = `<section class="panel fade-up premium-panel struktur-admin-panel">
+      <div class="panel-title-row">
+        <div>
+          <h3>Struktur Anggaran</h3>
+          <p class="panel-sub">Verifikator mengatur pagu, akses input, dan data bidang. Klik Edit untuk mengubah pagu atau akses.</p>
+        </div>
+        <button onclick="openTambahBidangModal()">+ Tambah Bidang</button>
+      </div>
+      <div class="admin-budget-list">${rows || `<p class="muted">Belum ada bidang.</p>`}</div>
+    </section>`;
+  } else if(isReviewer()){
+    const cards = (dashboard.rekap || []).map(r=>{
+      const over = toNumber(r.sisa_pagu) < 0;
+      return `<div class="review-row ${over?'over-budget':''}">
+        <div class="review-title"><b>${esc(r.nama_bidang)}</b><small>${esc(r.id_bidang)}</small></div>
+        <div class="review-metrics">
+          <div><span>Pagu</span><strong>${rupiah(r.pagu)}</strong></div>
+          <div><span>Total Perencanaan</span><strong>${rupiah(r.total_perencanaan)}</strong></div>
+          <div><span>Sisa Pagu</span><strong class="${over?'text-danger':''}">${rupiah(r.sisa_pagu)}</strong></div>
+          <div><span>Kegiatan</span><strong>${esc(r.jumlah_kegiatan||0)}</strong></div>
+          <div><span>Dokumen</span><strong>${esc(r.dokumen_upload||0)} upload / ${esc(r.dokumen_valid||0)} valid</strong></div>
+        </div>
+        <div class="review-status">${badge(r.status_akses)} ${over?badge('MELEBIHI PAGU'):badge(r.status_progress)}</div>
+      </div>`;
+    }).join("");
+    document.getElementById("contentArea").innerHTML = `<section class="panel fade-up premium-panel"><div class="panel-title-row"><div><h3>Struktur Anggaran - Mode Pemeriksaan</h3><p class="panel-sub">Role ${roleLabel()} dapat melihat seluruh bidang secara read-only.</p></div></div><div class="review-grid">${cards || `<p class="muted">Belum ada bidang.</p>`}</div></section>`;
+  } else {
+    const r = dashboard.rekap.find(x => String(x.id_bidang)===String(currentUser.id_bidang)) || {};
+    document.getElementById("contentArea").innerHTML = `<section class="panel fade-up premium-panel"><h3>Ringkasan Bidang</h3><p class="panel-sub">Informasi anggaran dan progres bidang.</p><button onclick="refreshData()">Refresh Data</button><div class="table-wrap"><table><thead><tr><th>Bidang</th><th>Pagu</th><th>Total Perencanaan</th><th>Sisa</th><th>Kegiatan</th><th>Dokumen</th><th>Akses</th><th>Progress</th></tr></thead><tbody><tr><td>${esc(r.nama_bidang||currentUser.nama_bidang||'-')}</td><td>${rupiah(r.pagu||0)}</td><td>${rupiah(r.total_perencanaan||0)}</td><td>${rupiah(r.sisa_pagu||0)}</td><td>${esc(r.jumlah_kegiatan||0)}</td><td>${esc(r.dokumen_upload||0)}</td><td>${badge(r.status_akses||'-')}</td><td>${badge(r.status_progress||'-')}</td></tr></tbody></table></div></section>`;
+  }
+}
+
+function openTambahBidangModal(){
+  const old = document.getElementById("tambahBidangModal");
+  if(old) old.remove();
+  const html = `<div class="status-modal-backdrop" id="tambahBidangModal" onclick="if(event.target.id==='tambahBidangModal') closeTambahBidangModal()">
+    <div class="status-modal-card tambah-bidang-card">
+      <div class="status-modal-head">
+        <h3>Tambah Bidang</h3>
+        <button type="button" onclick="closeTambahBidangModal()">Tutup</button>
+      </div>
+      <div class="status-modal-body">
+        <div class="form-grid tambah-bidang-grid">
+          <div class="field"><label>ID Bidang</label><input id="newIdBidang" placeholder="Contoh: BID-KTR-2026"></div>
+          <div class="field"><label>Nama Bidang</label><input id="newNamaBidang" placeholder="Contoh: Kesekretariatan"></div>
+          <div class="field"><label>Pagu</label><input id="newPaguBidang" inputmode="numeric" placeholder="Contoh: 10.000.000" oninput="onPaguAdminInput(this)"></div>
+          <div class="field"><label>Akses Input</label><select id="newAksesBidang"><option value="BUKA">BUKA</option><option value="TUTUP">TUTUP</option></select></div>
+          <div class="field full"><label>Keterangan</label><input id="newKetBidang" placeholder="Opsional"></div>
+        </div>
+        <div class="modal-actions-v49">
+          <button onclick="submitTambahBidang()">Simpan Bidang</button>
+          <button class="btn-soft" onclick="closeTambahBidangModal()">Batal</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML("beforeend", html);
+}
+function closeTambahBidangModal(){
+  const el = document.getElementById("tambahBidangModal");
+  if(el) el.remove();
+}
+async function submitTambahBidang(){
+  const data = {
+    id_bidang: document.getElementById("newIdBidang").value,
+    nama_bidang: document.getElementById("newNamaBidang").value,
+    pagu: toNumber(document.getElementById("newPaguBidang").value),
+    status_akses: document.getElementById("newAksesBidang").value,
+    keterangan: document.getElementById("newKetBidang").value
+  };
+  if(!data.id_bidang || !data.nama_bidang){ alert("ID bidang dan nama bidang wajib diisi."); return; }
+  showLoading("Menyimpan bidang...");
+  try{
+    const r = await apiPost({action:"saveBidang", user:currentUser, ...data});
+    alert(r.message || (r.success ? "Bidang berhasil disimpan" : "Gagal menyimpan bidang"));
+    if(r.success){ closeTambahBidangModal(); await refreshData(); }
+  }catch(e){ alert("Gagal menyimpan bidang. Detail: " + String(e.message || e).slice(0,240)); }
+  finally{ hideLoading(); }
+}
+
+function openRencanaStatusModal(idKegiatan){
+  const k = (dashboard?.perencanaan || []).find(x => String(x.id_kegiatan) === String(idKegiatan));
+  if(!k){ alert("Data perencanaan tidak ditemukan."); return; }
+  const st = String(k.status_perencanaan || "DIAJUKAN").toUpperCase();
+  const posisi = getRencanaPosisiSaatIni(k);
+  const jumlah = toNumber(k.jumlah || (toNumber(k.volume)*toNumber(k.harga_satuan)));
+  const rows = [];
+  rows.push(`<div class="status-row status-position-row"><div class="status-no">✓</div><div><b>Posisi Saat Ini</b><p><span class="status-position-text ${st === "DISETUJUI" ? "pos-valid" : (st === "DITOLAK" ? "pos-repair" : "pos-wait")}">${esc(posisi)}</span></p></div></div>`);
+  rows.push(`<div class="status-row"><div class="status-no">1.</div><div><b>Data Perencanaan</b><p><b>Nama kegiatan:</b> ${esc(k.nama_kegiatan || "-")}</p><p><b>Bidang:</b> ${esc(bidangName(k.id_bidang))}</p><p><b>Jumlah:</b> ${rupiah(jumlah)}</p><p><b>Metode:</b> ${esc(k.metode_pemilihan || metodePemilihanByNilai(jumlah))}</p><p><b>Waktu Pemilihan:</b> ${esc(k.waktu_pemilihan ? formatTanggalID(k.waktu_pemilihan) : "-")}</p><p><b>Tanggal Input:</b> ${fmtDateTimeID(k.tanggal_input)}</p></div></div>`);
+  if(k.alasan_penolakan){ rows.push(`<div class="status-row"><div class="status-no">2.</div><div><b>Catatan Penyesuaian</b><p>${esc(k.alasan_penolakan)}</p></div></div>`); }
+  if(k.alasan_perubahan || toNumber(k.perubahan_ke)){ rows.push(`<div class="status-row"><div class="status-no">3.</div><div><b>Pengajuan Perubahan</b><p><b>Perubahan:</b> ${toNumber(k.perubahan_ke) ? `Perubahan Ke-${toNumber(k.perubahan_ke)}` : "-"}</p>${k.alasan_perubahan ? `<p><b>Alasan perubahan:</b> ${esc(k.alasan_perubahan)}</p>` : ""}</div></div>`); }
+  if(k.riwayat_perubahan){ rows.push(`<div class="status-row"><div class="status-no">R.</div><div><b>Riwayat Perubahan</b><p>${esc(k.riwayat_perubahan).replace(/\bADMIN\b/g,"Verifikator").replace(/\bAdmin\b/g,"Verifikator").replace(/\n/g,"<br>")}</p></div></div>`); }
+  if(!k.alasan_penolakan && !k.alasan_perubahan && !k.riwayat_perubahan){ rows.push(`<div class="status-row"><div class="status-no">-</div><div><b>Catatan / Riwayat</b><p>Belum terdapat catatan penyesuaian atau riwayat perubahan.</p></div></div>`); }
+  const html = `<div class="status-modal-backdrop" id="rencanaStatusModal" onclick="if(event.target.id==='rencanaStatusModal') closeRencanaStatusModal()"><div class="status-modal-card"><div class="status-modal-head"><h3>Status Perencanaan</h3><button type="button" onclick="closeRencanaStatusModal()">Tutup</button></div><div class="status-modal-body"><div class="status-doc-title"><b>${esc(k.nama_kegiatan || "-")}</b><span>${esc(k.id_kegiatan || "-")}</span></div>${rows.join("")}</div></div></div>`;
+  const old = document.getElementById("rencanaStatusModal");
+  if(old) old.remove();
+  document.body.insertAdjacentHTML("beforeend", html);
+}
+
+
+/* =========================
+   SIMPROV v50 final override
+   Perencanaan dibuat seperti pencairan:
+   - Riwayat tampil sebagai tahapan.
+   - Status DITOLAK tombolnya Ajukan Perbaikan, bukan Edit/Hapus.
+   - Setelah perbaikan diajukan ulang, posisi menjadi Menunggu verifikasi perbaikan.
+   ========================= */
+function getRencanaPosisiSaatIni(k){
+  const st = String(k?.status_perencanaan || "DIAJUKAN").toUpperCase();
+  const riw = String(k?.riwayat_perubahan || "").toLowerCase();
+  const hasPerbaikan = !!(k?.alasan_penolakan || riw.includes("perbaikan diajukan ulang") || riw.includes("diajukan ulang"));
+  if(isKegiatanLocked(k)) return "Selesai";
+  if(st === "DISETUJUI") return "Disetujui";
+  if(st === "DITOLAK") return "Perlu perbaikan";
+  if(st === "PERUBAHAN_DIAJUKAN") return "Menunggu verifikasi perubahan";
+  if(st === "DIAJUKAN" && hasPerbaikan) return "Menunggu verifikasi perbaikan";
+  if(st === "DIAJUKAN") return "Menunggu verifikasi perencanaan";
+  return st.replace(/_/g, " ");
+}
+function rencanaRiwayatLines(k){
+  const rows = [];
+  if(k.riwayat_perubahan){
+    String(k.riwayat_perubahan).split(/\n+/).filter(Boolean).forEach(x => rows.push(x));
+  }
+  return rows;
+}
+function openRencanaStatusModal(idKegiatan){
+  const k = (dashboard?.perencanaan || []).find(x => String(x.id_kegiatan) === String(idKegiatan));
+  if(!k){ alert("Data perencanaan tidak ditemukan."); return; }
+
+  const st = String(k.status_perencanaan || "DIAJUKAN").toUpperCase();
+  const posisi = getRencanaPosisiSaatIni(k);
+  const jumlah = toNumber(k.jumlah || (toNumber(k.volume)*toNumber(k.harga_satuan)));
+  const rows = [];
+  const riwayatRows = rencanaRiwayatLines(k);
+
+  rows.push(`
+    <div class="status-row status-position-row">
+      <div class="status-no">✓</div>
+      <div>
+        <b>Posisi Saat Ini</b>
+        <p><span class="status-position-text ${st === "DISETUJUI" ? "pos-valid" : (st === "DITOLAK" ? "pos-repair" : "pos-wait")}">${esc(posisi)}</span></p>
+      </div>
+    </div>
+  `);
+
+  rows.push(`
+    <div class="status-row">
+      <div class="status-no">1.</div>
+      <div>
+        <b>Input Perencanaan</b>
+        <p><b>Tanggal:</b> ${fmtDateTimeID(k.tanggal_input)}</p>
+        <p><b>Oleh:</b> ${esc(k.input_by || bidangName(k.id_bidang) || "-")}</p>
+        <p><b>Kegiatan:</b> ${esc(k.nama_kegiatan || "-")}</p>
+        <p><b>Jumlah:</b> ${rupiah(jumlah)}</p>
+        <p><b>Metode:</b> ${esc(k.metode_pemilihan || metodePemilihanByNilai(jumlah))}</p>
+        <p><b>Waktu Pemilihan:</b> ${esc(k.waktu_pemilihan ? formatTanggalID(k.waktu_pemilihan) : "-")}</p>
+      </div>
+    </div>
+  `);
+
+  if(k.alasan_penolakan){
+    rows.push(`
+      <div class="status-row">
+        <div class="status-no">2.</div>
+        <div>
+          <b>Hasil pemeriksaan Verifikator</b>
+          <p><b>Status:</b> Perlu perbaikan</p>
+          <p><b>Catatan:</b> ${esc(k.alasan_penolakan)}</p>
+        </div>
+      </div>
+    `);
+  } else if(st === "DISETUJUI"){
+    rows.push(`
+      <div class="status-row">
+        <div class="status-no">2.</div>
+        <div>
+          <b>Hasil pemeriksaan Verifikator</b>
+          <p><b>Status:</b> Disetujui</p>
+        </div>
+      </div>
+    `);
+  }
+
+  if(st === "DIAJUKAN" && (k.alasan_penolakan || String(k.riwayat_perubahan || "").toLowerCase().includes("perbaikan"))){
+    rows.push(`
+      <div class="status-row">
+        <div class="status-no">3.</div>
+        <div>
+          <b>Perbaikan perencanaan</b>
+          <p><b>Status:</b> Menunggu verifikasi perbaikan</p>
+          <p>Data perencanaan telah diperbaiki dan diajukan kembali kepada Verifikator.</p>
+        </div>
+      </div>
+    `);
+  }
+
+  if(k.alasan_perubahan || toNumber(k.perubahan_ke)){
+    rows.push(`
+      <div class="status-row">
+        <div class="status-no">P.</div>
+        <div>
+          <b>Pengajuan Perubahan</b>
+          <p><b>Perubahan:</b> ${toNumber(k.perubahan_ke) ? `Perubahan Ke-${toNumber(k.perubahan_ke)}` : "-"}</p>
+          ${k.alasan_perubahan ? `<p><b>Alasan perubahan:</b> ${esc(k.alasan_perubahan)}</p>` : ""}
+        </div>
+      </div>
+    `);
+  }
+
+  if(riwayatRows.length){
+    rows.push(`
+      <div class="status-row">
+        <div class="status-no">R.</div>
+        <div>
+          <b>Riwayat Perencanaan</b>
+          <p>${riwayatRows.map(x => esc(x).replace(/\bADMIN\b/g,"Verifikator").replace(/\bAdmin\b/g,"Verifikator")).join("<br>")}</p>
+        </div>
+      </div>
+    `);
+  } else if(!k.alasan_penolakan && !k.alasan_perubahan && st !== "DISETUJUI"){
+    rows.push(`
+      <div class="status-row">
+        <div class="status-no">-</div>
+        <div>
+          <b>Catatan / Riwayat</b>
+          <p>Belum terdapat catatan penyesuaian atau riwayat perubahan.</p>
+        </div>
+      </div>
+    `);
+  }
+
+  const html = `<div class="status-modal-backdrop" id="rencanaStatusModal" onclick="if(event.target.id==='rencanaStatusModal') closeRencanaStatusModal()">
+    <div class="status-modal-card">
+      <div class="status-modal-head">
+        <h3>Status Perencanaan</h3>
+        <button type="button" onclick="closeRencanaStatusModal()">Tutup</button>
+      </div>
+      <div class="status-modal-body">
+        <div class="status-doc-title">
+          <b>${esc(k.nama_kegiatan || "-")}</b>
+          <span>${esc(k.id_kegiatan || "-")}</span>
+        </div>
+        ${rows.join("")}
+      </div>
+    </div>
+  </div>`;
+  const old = document.getElementById("rencanaStatusModal");
+  if(old) old.remove();
+  document.body.insertAdjacentHTML("beforeend", html);
+}
+function renderPerencanaanRow(k){
+  try{
+    k = k || {};
+    const st = String(k.status_perencanaan||"DIAJUKAN").toUpperCase();
+    const locked = isKegiatanLocked(k);
+    const aksesBuka = aksesPerencanaanTerbuka();
+    const jumlah = toNumber(k.jumlah || (toNumber(k.volume)*toNumber(k.harga_satuan)));
+    const metode = k.metode_pemilihan || metodePemilihanByNilai(jumlah);
+    const waktu = k.waktu_pemilihan ? formatTanggalID(k.waktu_pemilihan) : "-";
+    const hasNote = !!(k.alasan_penolakan || k.alasan_perubahan || k.riwayat_perubahan || toNumber(k.perubahan_ke));
+    const note = `<button class="btn-mini btn-detail" onclick="openRencanaStatusModal('${esc(k.id_kegiatan)}')">${hasNote ? "Lihat Riwayat" : "Lihat"}</button>`;
+
+    let aksi = "";
+    if(canManage()){
+      if(st === "DIAJUKAN" || st === "PERUBAHAN_DIAJUKAN") aksi = `<button class="btn-mini btn-green" onclick="setujui('${esc(k.id_kegiatan)}')">Setujui</button><button class="btn-mini btn-orange" onclick="tolak('${esc(k.id_kegiatan)}')">Minta Perbaikan</button>`;
+      else aksi = `<span class="muted">-</span>`;
+    } else if(isReviewer()){
+      aksi = `<span class="audit-pill">Read-only</span>`;
+    } else if(locked){
+      aksi = `<span class="status-done-pill">Selesai</span>`;
+    } else if(!aksesBuka){
+      aksi = `<span class="lock-badge">Akses perencanaan ditutup</span>`;
+    } else {
+      if(st === "DITOLAK") aksi = `<button class="btn-mini btn-orange" onclick="openEditModal('${esc(k.id_kegiatan)}','repair')">Ajukan Perbaikan</button>`;
+      else if(st === "DIAJUKAN") aksi = `<button class="btn-mini" onclick="openEditModal('${esc(k.id_kegiatan)}','normal')">Edit</button><button class="btn-mini btn-red" onclick="hapusPerencanaan('${esc(k.id_kegiatan)}')">Hapus</button>`;
+      else if(st === "DISETUJUI") aksi = `<button class="btn-mini btn-orange" onclick="openEditModal('${esc(k.id_kegiatan)}','change')">Ajukan Perubahan</button>`;
+      else aksi = `<span class="muted">Menunggu Verifikator</span>`;
+    }
+
+    const perubahan = toNumber(k.perubahan_ke) ? `<br><small class="muted">Perubahan Ke-${toNumber(k.perubahan_ke)}</small>` : "";
+    const rowClass = locked ? "row-selesai" : (st === "DITOLAK" ? "row-perbaikan" : "row-proses");
+    return `<tr class="rencana-row ${rowClass}">
+      <td>${esc(k.id_kegiatan)}</td>
+      <td>${esc(bidangName(k.id_bidang))}</td>
+      <td><b>${esc(k.nama_kegiatan)}</b>${perubahan}</td>
+      <td>${esc(k.volume)}</td>
+      <td>${esc(k.satuan)}</td>
+      <td>${rupiah(k.harga_satuan)}</td>
+      <td><b>${rupiah(jumlah)}</b></td>
+      <td>${esc(metode)}</td>
+      <td>${esc(waktu)}</td>
+      <td>${badge(st)}</td>
+      <td class="note-cell note-cell-popup">${note}</td>
+      <td class="nowrap">${aksi}</td>
+    </tr>`;
+  }catch(e){
+    console.error("ROW_PERENCANAAN_ERROR", e, k);
+    return `<tr class="rencana-row row-perbaikan"><td colspan="12">Data kegiatan ${esc(k?.id_kegiatan || "-")} perlu dicek. Detail: ${esc(e.message || e)}</td></tr>`;
+  }
+}
+function openEditModal(id, mode){
+  const k = dashboard.perencanaan.find(x => String(x.id_kegiatan)===String(id)); if(!k) return;
+  if(isKegiatanLocked(k)){ alert("Kegiatan sudah selesai sampai validasi pencairan, perencanaan terkunci."); return; }
+  if(!aksesPerencanaanTerbuka()){ alert("Akses perencanaan bidang sedang ditutup Verifikator. Menu pencairan tetap bisa digunakan."); return; }
+
+  const realMode = mode === "repair" ? "normal" : mode;
+  document.getElementById("editMode").value = realMode;
+  document.getElementById("editIdKegiatan").value = k.id_kegiatan;
+  document.getElementById("editNamaKegiatan").value = k.nama_kegiatan || "";
+  document.getElementById("editKeterangan").value = k.keterangan || "";
+  document.getElementById("editVolume").value = angkaID(k.volume);
+  document.getElementById("editSatuan").value = k.satuan || "";
+  document.getElementById("editHarga").value = angkaID(k.harga_satuan);
+  if(document.getElementById("editWaktuPemilihan")) document.getElementById("editWaktuPemilihan").value = /^\d{4}-\d{2}-\d{2}$/.test(String(k.waktu_pemilihan||"")) ? k.waktu_pemilihan : "";
+  document.getElementById("editAlasanPerubahan").value = "";
+
+  if(mode === "repair"){
+    document.getElementById("editModalTitle").innerText = "Ajukan Perbaikan Perencanaan";
+    document.getElementById("editModalSub").innerText = "Perbaiki data sesuai catatan Verifikator. Setelah disimpan, status menjadi Menunggu Verifikasi Perbaikan.";
+  } else {
+    document.getElementById("editModalTitle").innerText = mode === "change" ? `Ajukan Perubahan Perencanaan` : "Edit Perencanaan";
+    document.getElementById("editModalSub").innerText = mode === "change" ? `Perubahan akan masuk sebagai Perubahan Ke-${toNumber(k.perubahan_ke)+1} dan menunggu Verifikator.` : "Data akan diajukan kembali ke Verifikator.";
+  }
+  document.getElementById("alasanPerubahanWrap").classList.toggle("hidden", mode !== "change");
+  setAutoTotal("editVolume","editHarga","editTotalPreview");
+  document.getElementById("editModal").classList.remove("hidden");
+}
+
+
+/* =========================
+   SIMPROV v51 final override
+   Riwayat Perencanaan selalu tampil sebagai tahapan, bukan hanya kalau ada riwayat_perubahan.
+   ========================= */
+function buildRencanaTimeline(k){
+  const st = String(k.status_perencanaan || "DIAJUKAN").toUpperCase();
+  const posisi = getRencanaPosisiSaatIni(k);
+  const lines = [];
+
+  lines.push({
+    title:"Input Perencanaan",
+    body:`Tanggal: ${fmtDateTimeID(k.tanggal_input)}<br>Oleh: ${esc(k.input_by || bidangName(k.id_bidang) || "-")}<br>Status: Diajukan ke Verifikator`
+  });
+
+  if(st === "DISETUJUI"){
+    lines.push({
+      title:"Hasil pemeriksaan Verifikator",
+      body:`Status: Disetujui<br>Posisi saat ini: ${esc(posisi)}`
+    });
+  } else if(st === "DITOLAK"){
+    lines.push({
+      title:"Hasil pemeriksaan Verifikator",
+      body:`Status: Perlu perbaikan${k.alasan_penolakan ? `<br>Catatan: ${esc(k.alasan_penolakan)}` : ""}`
+    });
+  } else if(st === "PERUBAHAN_DIAJUKAN"){
+    lines.push({
+      title:"Pengajuan perubahan",
+      body:`Status: Menunggu verifikasi perubahan${k.alasan_perubahan ? `<br>Alasan perubahan: ${esc(k.alasan_perubahan)}` : ""}`
+    });
+  } else if(st === "DIAJUKAN" && (k.alasan_penolakan || String(k.riwayat_perubahan || "").toLowerCase().includes("perbaikan"))){
+    lines.push({
+      title:"Perbaikan perencanaan",
+      body:"Status: Menunggu verifikasi perbaikan<br>Data telah diperbaiki dan diajukan kembali kepada Verifikator"
+    });
+  } else if(st === "DIAJUKAN"){
+    lines.push({
+      title:"Proses pemeriksaan",
+      body:"Status: Menunggu verifikasi perencanaan"
+    });
+  }
+
+  if(k.alasan_perubahan && st !== "PERUBAHAN_DIAJUKAN"){
+    lines.push({
+      title:"Alasan perubahan",
+      body:esc(k.alasan_perubahan)
+    });
+  }
+
+  const rawHist = String(k.riwayat_perubahan || "").trim();
+  if(rawHist){
+    rawHist.split(/\n+/).filter(Boolean).forEach(x => {
+      lines.push({
+        title:"Catatan riwayat",
+        body:esc(x).replace(/\bADMIN\b/g,"Verifikator").replace(/\bAdmin\b/g,"Verifikator")
+      });
+    });
+  }
+
+  return lines;
+}
+function openRencanaStatusModal(idKegiatan){
+  const k = (dashboard?.perencanaan || []).find(x => String(x.id_kegiatan) === String(idKegiatan));
+  if(!k){ alert("Data perencanaan tidak ditemukan."); return; }
+
+  const st = String(k.status_perencanaan || "DIAJUKAN").toUpperCase();
+  const posisi = getRencanaPosisiSaatIni(k);
+  const jumlah = toNumber(k.jumlah || (toNumber(k.volume)*toNumber(k.harga_satuan)));
+  const timeline = buildRencanaTimeline(k);
+
+  const rows = [];
+  rows.push(`
+    <div class="status-row status-position-row">
+      <div class="status-no">✓</div>
+      <div>
+        <b>Posisi Saat Ini</b>
+        <p><span class="status-position-text ${st === "DISETUJUI" ? "pos-valid" : (st === "DITOLAK" ? "pos-repair" : "pos-wait")}">${esc(posisi)}</span></p>
+      </div>
+    </div>
+  `);
+
+  rows.push(`
+    <div class="status-row">
+      <div class="status-no">1.</div>
+      <div>
+        <b>Data Perencanaan</b>
+        <p><b>Nama kegiatan:</b> ${esc(k.nama_kegiatan || "-")}</p>
+        <p><b>Bidang:</b> ${esc(bidangName(k.id_bidang))}</p>
+        <p><b>Jumlah:</b> ${rupiah(jumlah)}</p>
+        <p><b>Metode:</b> ${esc(k.metode_pemilihan || metodePemilihanByNilai(jumlah))}</p>
+        <p><b>Waktu Pemilihan:</b> ${esc(k.waktu_pemilihan ? formatTanggalID(k.waktu_pemilihan) : "-")}</p>
+        <p><b>Tanggal Input:</b> ${fmtDateTimeID(k.tanggal_input)}</p>
+      </div>
+    </div>
+  `);
+
+  rows.push(`
+    <div class="status-row">
+      <div class="status-no">R.</div>
+      <div>
+        <b>Riwayat Perencanaan</b>
+        <div class="rencana-timeline-list">
+          ${timeline.map((x,i)=>`<div class="rencana-timeline-item"><span>${i+1}</span><div><b>${x.title}</b><p>${x.body}</p></div></div>`).join("")}
+        </div>
+      </div>
+    </div>
+  `);
+
+  const html = `<div class="status-modal-backdrop" id="rencanaStatusModal" onclick="if(event.target.id==='rencanaStatusModal') closeRencanaStatusModal()">
+    <div class="status-modal-card">
+      <div class="status-modal-head">
+        <h3>Status Perencanaan</h3>
+        <button type="button" onclick="closeRencanaStatusModal()">Tutup</button>
+      </div>
+      <div class="status-modal-body">
+        <div class="status-doc-title">
+          <b>${esc(k.nama_kegiatan || "-")}</b>
+          <span>${esc(k.id_kegiatan || "-")}</span>
+        </div>
+        ${rows.join("")}
+      </div>
+    </div>
+  </div>`;
+  const old = document.getElementById("rencanaStatusModal");
+  if(old) old.remove();
+  document.body.insertAdjacentHTML("beforeend", html);
+}
+
+
+/* =========================
+   SIMPROV v52 final override
+   - Dropdown upload dokumen tidak menampilkan jenis dokumen yang sama pada baris tambahan.
+   - Verifikator minta perbaikan dokumen mengirim catatan_admin yang benar ke backend.
+   ========================= */
+function selectedDocKeysInUploadRows(excludeSelect){
+  const keys = new Set();
+  document.querySelectorAll("#uploadRows .jenisDok").forEach(sel => {
+    if(excludeSelect && sel === excludeSelect) return;
+    const v = sel.value;
+    if(v) keys.add(docTypeKey(v));
+  });
+  return keys;
+}
+function docOptionsForSelect(selected="", idKegiatan="", selectEl=null){
+  let list = idKegiatan ? remainingDocTypesForKegiatan(idKegiatan) : JENIS_DOKUMEN_SOP;
+  const selectedKey = docTypeKey(selected);
+  const used = selectedDocKeysInUploadRows(selectEl);
+  list = list.filter(x => !used.has(docTypeKey(x)) || docTypeKey(x) === selectedKey);
+  if(selected && !list.some(x => docTypeKey(x) === selectedKey)) list = [selected, ...list];
+  if(!list.length) return `<option value="" disabled selected>Semua jenis dokumen sudah dipilih/diupload</option>`;
+  return list.map(x => `<option value="${esc(x)}" ${docTypeKey(x)===selectedKey?'selected':''}>${esc(x)}</option>`).join("");
+}
+function docOptionsHtml(selected="", idKegiatan=""){
+  return docOptionsForSelect(selected, idKegiatan, null);
+}
+function refreshUploadJenisDokumenOptions(){
+  const idKegiatan = document.getElementById("dokKegiatan")?.value || "";
+  document.querySelectorAll("#uploadRows .jenisDok").forEach(sel => {
+    const old = sel.value;
+    sel.innerHTML = docOptionsForSelect(old, idKegiatan, sel);
+    if(!sel.value && sel.options.length) sel.selectedIndex = 0;
+  });
+}
+function updateSaranDokumen(){
+  const id = document.getElementById("dokKegiatan")?.value || "";
+  const box = document.getElementById("saranDokumen");
+  if(box) box.innerHTML = "";
+  refreshUploadJenisDokumenOptions();
+}
+function addUploadRow(){
+  const idKegiatan = document.getElementById("dokKegiatan")?.value || "";
+  const used = selectedDocKeysInUploadRows(null);
+  const remaining = remainingDocTypesForKegiatan(idKegiatan).filter(x => !used.has(docTypeKey(x)));
+  if(idKegiatan && !remaining.length){
+    alert("Semua jenis dokumen wajib sudah dipilih atau sudah diupload. Jika ada dokumen berstatus PERBAIKAN, gunakan tombol Upload Ulang pada rincian file.");
+    return;
+  }
+  const wrap = document.getElementById("uploadRows");
+  const div = document.createElement("div");
+  div.className = "doc-upload-row";
+  div.innerHTML = `<div class="field"><label>Jenis Dokumen</label><select class="jenisDok" onchange="refreshUploadJenisDokumenOptions()">${remaining.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join("")}</select></div><div class="field"><label>File Dokumen</label><input type="file" class="fileDok"></div><button class="btn-red" onclick="removeUploadRow(this)" type="button">Hapus</button>`;
+  wrap.appendChild(div);
+  refreshUploadJenisDokumenOptions();
+}
+function removeUploadRow(btn){
+  const row = btn.closest(".doc-upload-row");
+  if(row) row.remove();
+  refreshUploadJenisDokumenOptions();
+}
+async function uploadDokumen(){
+  const idKegiatan = document.getElementById("dokKegiatan")?.value;
+  if(!idKegiatan){ alert("Tidak ada kegiatan yang bisa diupload. Jika dokumen berstatus PERBAIKAN, upload ulang dari rincian dokumen di bawah."); return; }
+  const rows = [...document.querySelectorAll(".doc-upload-row")];
+  const items = rows.map(row => ({jenis:row.querySelector(".jenisDok")?.value || "", file:row.querySelector(".fileDok")?.files?.[0]})).filter(x=>x.file);
+  if(!items.length){ alert("Pilih minimal 1 file dokumen."); return; }
+  const picked = new Set();
+  const remainingKeys = new Set(remainingDocTypesForKegiatan(idKegiatan).map(docTypeKey));
+  for(const it of items){
+    const key = docTypeKey(it.jenis);
+    if(!key){ alert("Jenis dokumen wajib dipilih."); return; }
+    if(picked.has(key)){ alert(`Jenis dokumen ${it.jenis} dipilih lebih dari satu kali. Silakan pilih jenis dokumen yang berbeda.`); return; }
+    picked.add(key);
+    if(!remainingKeys.has(key)){
+      alert(`Jenis dokumen ${it.jenis} sudah pernah diupload. Jika perlu perbaikan, gunakan tombol Upload Ulang pada rincian file.`);
+      return;
+    }
+  }
+  showLoading(`Upload 1/${items.length} dokumen...`);
+  try{
+    for(let i=0;i<items.length;i++){
+      document.getElementById("loadingText").innerText = `Upload ${i+1}/${items.length} dokumen...`;
+      const base64 = await fileToBase64(items[i].file);
+      const r = await apiPost({action:"uploadDokumen", user:currentUser, id_kegiatan:idKegiatan, jenis_dokumen:items[i].jenis, file_name:items[i].file.name, mime_type:items[i].file.type, file_base64:base64});
+      if(!r.success) throw new Error(r.message);
+    }
+    alert("Dokumen berhasil diupload."); await loadDashboard(false);
+  }catch(e){ alert(e.message || "Gagal upload dokumen."); }
+  finally{ hideLoading(); }
+}
+async function verifDok(id, status){
+  showLoading("Verifikasi dokumen...");
+  try{
+    const r=await apiPost({action:"verifyDokumen", user:currentUser, id_dokumen:id, status_verifikasi:status, catatan_admin:""});
+    alert(r.message); if(r.success) await loadDashboard(false);
+  }catch(e){alert(e.message)}finally{hideLoading();}
+}
+async function mintaPerbaikanDok(id){
+  const catatan = prompt("Alasan perbaikan dokumen wajib diisi:");
+  if(!catatan || !String(catatan).trim()){ alert("Alasan perbaikan wajib diisi."); return; }
+  showLoading("Mengirim status perbaikan...");
+  try{
+    const r=await apiPost({action:"verifyDokumen", user:currentUser, id_dokumen:id, status_verifikasi:"PERBAIKAN", catatan_admin:String(catatan).trim(), catatan_Verifikator:String(catatan).trim()});
+    alert(r.message); if(r.success) await loadDashboard(false);
+  }catch(e){alert(e.message)}finally{hideLoading();}
+}
+
+
+/* v52 delegated change listener for duplicate prevention */
+document.addEventListener('change', function(e){
+  if(e.target && e.target.classList && e.target.classList.contains('jenisDok')){
+    setTimeout(refreshUploadJenisDokumenOptions, 0);
+  }
+});
+
+
+/* =========================
+   SIMPROV v53 final override
+   Dokumen laporan disesuaikan dengan versi terbaru:
+   - posisi saat ini perencanaan,
+   - riwayat perencanaan bentuk tahapan,
+   - status dokumen, tanggal upload/verifikasi/perbaikan,
+   - catatan Verifikator,
+   - riwayat dokumen.
+   ========================= */
+function reportCatatanDokumen(d){
+  return d.catatan_Verifikator || d.catatan_admin || d.catatan || "-";
+}
+function reportRiwayatDokumen(d){
+  const rows = [];
+  const posisi = typeof getDocPosisiSaatIni === "function" ? getDocPosisiSaatIni(d) : displayStatusText(d.status_verifikasi || "MENUNGGU");
+  rows.push(`Posisi saat ini: ${posisi}`);
+  rows.push(`Upload awal: ${formatTanggalJam(d.tanggal_upload)} oleh ${d.upload_by || "-"}`);
+  if(d.tanggal_verifikasi || d.verifikasi_by || reportCatatanDokumen(d) !== "-"){
+    rows.push(`Pemeriksaan Verifikator: ${formatTanggalJam(d.tanggal_verifikasi)} oleh ${d.verifikasi_by || "-"}${reportCatatanDokumen(d) !== "-" ? " - Catatan: " + reportCatatanDokumen(d) : ""}`);
+  }
+  if(d.tanggal_revisi || d.revisi_by){
+    rows.push(`Upload ulang/perbaikan: ${formatTanggalJam(d.tanggal_revisi)} oleh ${d.revisi_by || "-"}`);
+  }
+  if(d.riwayat_dokumen){
+    rows.push(`Riwayat: ${String(d.riwayat_dokumen).replace(/\bADMIN\b/g,"Verifikator").replace(/\bAdmin\b/g,"Verifikator")}`);
+  }
+  return rows.join("\n");
+}
+function reportRiwayatPerencanaan(k){
+  const posisi = typeof getRencanaPosisiSaatIni === "function" ? getRencanaPosisiSaatIni(k) : displayStatusText(k.status_perencanaan || "-");
+  const rows = [];
+  rows.push(`Posisi saat ini: ${posisi}`);
+  rows.push(`Input perencanaan: ${formatTanggalJam(k.tanggal_input)} oleh ${k.input_by || bidangName(k.id_bidang) || "-"}`);
+  const st = String(k.status_perencanaan || "").toUpperCase();
+  if(st === "DISETUJUI"){
+    rows.push("Hasil pemeriksaan Verifikator: Disetujui");
+  }
+  if(st === "DITOLAK" || k.alasan_penolakan){
+    rows.push(`Hasil pemeriksaan Verifikator: Perlu perbaikan${k.alasan_penolakan ? " - Catatan: " + k.alasan_penolakan : ""}`);
+  }
+  if(st === "DIAJUKAN" && (k.alasan_penolakan || String(k.riwayat_perubahan || "").toLowerCase().includes("perbaikan"))){
+    rows.push("Perbaikan perencanaan: Menunggu verifikasi perbaikan");
+  }
+  if(k.alasan_perubahan || toNumber(k.perubahan_ke)){
+    rows.push(`Pengajuan perubahan: ${toNumber(k.perubahan_ke) ? "Perubahan Ke-" + toNumber(k.perubahan_ke) : "-"}${k.alasan_perubahan ? " - " + k.alasan_perubahan : ""}`);
+  }
+  if(k.riwayat_perubahan){
+    rows.push(`Riwayat: ${String(k.riwayat_perubahan).replace(/\bADMIN\b/g,"Verifikator").replace(/\bAdmin\b/g,"Verifikator")}`);
+  }
+  return rows.join("\n");
+}
+function downloadDashboardPDF(){
+  const userBidang = String(currentUser?.id_bidang || "");
+  const semuaBidang = canSeeAll();
+  const rekap = semuaBidang ? (dashboard.rekap || []) : (dashboard.rekap || []).filter(r => String(r.id_bidang) === userBidang);
+  const perencanaan = semuaBidang ? (dashboard.perencanaan || []) : (dashboard.perencanaan || []).filter(k => String(k.id_bidang) === userBidang);
+  const dokumen = semuaBidang ? (dashboard.dokumen || []) : (dashboard.dokumen || []).filter(d => String(d.id_bidang) === userBidang);
+
+  const pagu = rekap.reduce((s,r)=>s+toNumber(r.pagu),0);
+  const total = rekap.reduce((s,r)=>s+toNumber(r.total_perencanaan),0);
+  const sisa = pagu - total;
+  const valid = dokumen.filter(d=>isDocValidKeuanganV70(d)).length;
+  const perbaikanDok = dokumen.filter(d=>["PERBAIKAN","DITOLAK"].includes(String(d.status_verifikasi||"").toUpperCase())).length;
+  const menungguDok = dokumen.filter(d=>["","MENUNGGU"].includes(String(d.status_verifikasi||"").toUpperCase())).length;
+  const perluPersetujuan = perencanaan.filter(k => ["DIAJUKAN","PERUBAHAN_DIAJUKAN"].includes(String(k.status_perencanaan||"").toUpperCase())).length;
+  const perluPerbaikanRencana = perencanaan.filter(k => String(k.status_perencanaan||"").toUpperCase()==="DITOLAK").length;
+  const bidangOver = rekap.filter(r => toNumber(r.sisa_pagu) < 0).length;
+
+  const rowsRekap = rekap.map((r,i)=>`<tr>
+    <td>${i+1}</td>
+    <td>${plainText(r.nama_bidang)}<br><span class="small">${plainText(r.id_bidang)}</span></td>
+    <td>${rupiah(r.pagu)}</td>
+    <td>${rupiah(r.total_perencanaan)}</td>
+    <td class="${toNumber(r.sisa_pagu)<0?'red':''}">${rupiah(r.sisa_pagu)}</td>
+    <td>${plainText(r.jumlah_kegiatan||0)}</td>
+    <td>${plainText(r.dokumen_upload||0)}</td>
+    <td>${plainText(r.dokumen_valid||0)}</td>
+    <td>${plainText(r.status_akses||'-')}</td>
+    <td class="status">${plainText(toNumber(r.sisa_pagu)<0?'MELEBIHI PAGU':displayStatusText(r.status_progress||'-'))}</td>
+  </tr>`).join("");
+
+  const rowsPerencanaan = perencanaan.map((k,i)=>{
+    const jumlah = toNumber(k.jumlah || (toNumber(k.volume)*toNumber(k.harga_satuan)));
+    const posisi = typeof getRencanaPosisiSaatIni === "function" ? getRencanaPosisiSaatIni(k) : displayStatusText(k.status_perencanaan || "-");
+    const riwayat = reportRiwayatPerencanaan(k);
+    return `<tr>
+      <td>${i+1}</td>
+      <td>${plainText(k.id_kegiatan)}</td>
+      <td>${plainText(bidangName(k.id_bidang))}</td>
+      <td>${plainText(k.nama_kegiatan)}</td>
+      <td>${plainText(k.keterangan||'-')}</td>
+      <td>${plainText(k.volume||0)} ${plainText(k.satuan||'')}</td>
+      <td>${rupiah(k.harga_satuan)}</td>
+      <td>${rupiah(jumlah)}</td>
+      <td>${plainText(k.metode_pemilihan || metodePemilihanByNilai(jumlah))}</td>
+      <td>${plainText(k.waktu_pemilihan ? formatTanggalID(k.waktu_pemilihan) : "-")}</td>
+      <td class="status">${plainText(posisi)}</td>
+      <td>${plainText(formalReportText(riwayat)).replace(/\n/g,'<br>')}</td>
+      <td>${plainText(displayStatusText(getPencairanStatus(k.id_kegiatan)))}</td>
+    </tr>`;
+  }).join("");
+
+  const rowsDokumen = dokumen.map((d,i)=>{
+    const posisi = typeof getDocPosisiSaatIni === "function" ? getDocPosisiSaatIni(d) : displayStatusText(d.status_verifikasi || "MENUNGGU");
+    return `<tr>
+      <td>${i+1}</td>
+      <td>${plainText(bidangName(d.id_bidang))}</td>
+      <td>${plainText(kegiatanName(d.id_kegiatan))}<br><span class="small">${plainText(d.id_kegiatan)}</span></td>
+      <td>${plainText(normalizeJenisDokumenLabel(d.jenis_dokumen))}</td>
+      <td>${plainText(d.nama_file||'-')}</td>
+      <td>${htmlLink(d.url_file, 'Buka File')}</td>
+      <td class="status">${plainText(posisi)}</td>
+      <td>${plainText(displayStatusText(getPencairanStatus(d.id_kegiatan)))}</td>
+      <td>${plainText(reportCatatanDokumen(d))}</td>
+      <td>${plainText(formatTanggalJam(d.tanggal_upload))}</td>
+      <td>${plainText(formatTanggalJam(d.tanggal_verifikasi))}</td>
+      <td>${plainText(formatTanggalJam(d.tanggal_revisi))}</td>
+      <td>${plainText(formalReportText(reportRiwayatDokumen(d))).replace(/\n/g,'<br>')}</td>
+    </tr>`;
+  }).join("");
+
+  const body = `<div class="summary">
+    <div class="card"><span>Total Pagu</span><b>${rupiah(pagu)}</b></div>
+    <div class="card"><span>Total Perencanaan</span><b>${rupiah(total)}</b></div>
+    <div class="card"><span>Sisa Pagu</span><b class="${sisa<0?'red':''}">${rupiah(sisa)}</b></div>
+    <div class="card"><span>Dokumen Valid</span><b>${valid}/${dokumen.length}</b></div>
+    <div class="card"><span>Perlu Pemeriksaan</span><b>${perluPersetujuan} rencana / ${menungguDok} dokumen</b></div>
+  </div>
+  <div class="note"><b>Ringkasan Pemeriksaan:</b> ${perluPerbaikanRencana} perencanaan perlu perbaikan, ${perbaikanDok} dokumen perlu perbaikan, ${bidangOver} bidang melebihi pagu.</div>
+  <h3>1. Rekapitulasi Anggaran per Bidang</h3>
+  <table><thead><tr><th>No</th><th>Bidang</th><th>Pagu</th><th>Perencanaan</th><th>Sisa</th><th>Kegiatan</th><th>Dok Upload</th><th>Dok Valid</th><th>Akses</th><th>Progress</th></tr></thead><tbody>${rowsRekap || `<tr><td colspan="10">Belum ada data</td></tr>`}</tbody></table>
+  <h3>2. Rekap Data Perencanaan dan Riwayat Pemeriksaan</h3>
+  <table><thead><tr><th>No</th><th>ID Kegiatan</th><th>Bidang</th><th>Nama Kegiatan</th><th>Keterangan</th><th>Volume</th><th>Harga Satuan</th><th>Jumlah</th><th>Metode</th><th>Waktu Pemilihan</th><th>Posisi Saat Ini</th><th>Riwayat Perencanaan</th><th>Status Pencairan</th></tr></thead><tbody>${rowsPerencanaan || `<tr><td colspan="13">Belum ada data perencanaan</td></tr>`}</tbody></table>
+  <h3>3. Rekap Dokumen Pencairan, Verifikasi, dan Link File</h3>
+  <table><thead><tr><th>No</th><th>Bidang</th><th>Kegiatan</th><th>Jenis Dokumen</th><th>Nama File</th><th>Link File</th><th>Posisi Dokumen</th><th>Status Pencairan</th><th>Catatan Verifikator</th><th>Tanggal Upload</th><th>Tanggal Verifikasi</th><th>Tanggal Perbaikan</th><th>Riwayat Dokumen</th></tr></thead><tbody>${rowsDokumen || `<tr><td colspan="13">Belum ada dokumen pencairan</td></tr>`}</tbody></table>`;
+
+  openReportWindow(semuaBidang ? "Laporan Monitoring Keseluruhan SIMPROV" : "Laporan Monitoring Bidang " + (currentUser?.nama_bidang || currentUser?.nama || ""), body);
+}
+function downloadPerencanaanPDF(){
+  const data = getFilteredRencana();
+  const rows = data.map((k,i)=>{
+    const jumlah = toNumber(k.jumlah || (toNumber(k.volume)*toNumber(k.harga_satuan)));
+    const posisi = typeof getRencanaPosisiSaatIni === "function" ? getRencanaPosisiSaatIni(k) : displayStatusText(k.status_perencanaan || "-");
+    return `<tr>
+      <td>${i+1}</td><td>${plainText(k.id_kegiatan)}</td><td>${plainText(bidangName(k.id_bidang))}</td><td>${plainText(k.nama_kegiatan)}</td>
+      <td>${plainText(k.keterangan||"-")}</td><td>${plainText(k.volume||0)} ${plainText(k.satuan||"-")}</td>
+      <td>${rupiah(k.harga_satuan)}</td><td>${rupiah(jumlah)}</td>
+      <td>${plainText(k.metode_pemilihan || metodePemilihanByNilai(jumlah))}</td><td>${plainText(k.waktu_pemilihan ? formatTanggalID(k.waktu_pemilihan) : "-")}</td>
+      <td class="status">${plainText(posisi)}</td><td>${plainText(formalReportText(reportRiwayatPerencanaan(k))).replace(/\n/g,"<br>")}</td><td>${plainText(displayStatusText(getPencairanStatus(k.id_kegiatan)))}</td>
+    </tr>`;
+  }).join("");
+  openReportWindow("Rekap Perencanaan", `<div class="note">Laporan mengikuti filter yang sedang tampil pada aplikasi.</div><table><thead><tr><th>No</th><th>ID</th><th>Bidang</th><th>Nama Kegiatan</th><th>Keterangan</th><th>Volume</th><th>Harga Satuan</th><th>Jumlah</th><th>Metode</th><th>Waktu Pemilihan</th><th>Posisi Saat Ini</th><th>Riwayat Perencanaan</th><th>Status Pencairan</th></tr></thead><tbody>${rows || `<tr><td colspan="13">Belum ada data</td></tr>`}</tbody></table>`);
+}
+
+/* SIMPROV v54 final override - laporan dokumen per kegiatan dan riwayat ringkas */
+function reportCatatanDokumenV54(d){
+  return d.catatan_Verifikator || d.catatan_admin || d.catatan || "-";
+}
+function reportDocStatusRawV54(d){
+  return String(d.status_verifikasi || "MENUNGGU").toUpperCase();
+}
+function reportGroupDocStatusV54(docs){
+  if(!docs || !docs.length) return "BELUM ADA DOKUMEN";
+  if(docs.some(d => ["PERBAIKAN","DITOLAK"].includes(reportDocStatusRawV54(d)))) return "PERLU PERBAIKAN";
+  if(docs.every(d => reportDocStatusRawV54(d) === "VALID")) return "SUDAH DIVERIFIKASI";
+  return "MENUNGGU VERIFIKASI";
+}
+function reportGroupPencairanStatusV54(idKegiatan, docs){
+  const st = reportGroupDocStatusV54(docs);
+  if(st === "SUDAH DIVERIFIKASI") return "SUDAH DIVERIFIKASI";
+  if(st === "PERLU PERBAIKAN") return "PERLU PERBAIKAN";
+  if(st === "MENUNGGU VERIFIKASI") return "MENUNGGU VERIFIKASI";
+  return displayStatusText(getPencairanStatus(idKegiatan));
+}
+function reportTahapanDokumenRingkasV54(d){
+  const rows = [];
+  rows.push(`Upload awal: ${formatTanggalJam(d.tanggal_upload)} oleh ${d.upload_by || "-"}`);
+  if(d.tanggal_verifikasi || d.verifikasi_by || reportCatatanDokumenV54(d) !== "-"){
+    const st = reportDocStatusRawV54(d);
+    const hasil = st === "VALID" ? "Dokumen valid" : (st === "PERBAIKAN" || st === "DITOLAK" ? "Perlu perbaikan" : displayStatusText(st));
+    rows.push(`Pemeriksaan Verifikator: ${formatTanggalJam(d.tanggal_verifikasi)} oleh ${d.verifikasi_by || "-"} - ${hasil}${reportCatatanDokumenV54(d) !== "-" ? " (" + reportCatatanDokumenV54(d) + ")" : ""}`);
+  }
+  if(d.tanggal_revisi || d.revisi_by){
+    rows.push(`Upload ulang/perbaikan: ${formatTanggalJam(d.tanggal_revisi)} oleh ${d.revisi_by || "-"}`);
+  }
+  const stAkhir = reportDocStatusRawV54(d);
+  if(stAkhir === "VALID") rows.push("Posisi akhir: Sudah diverifikasi");
+  else if(stAkhir === "PERBAIKAN" || stAkhir === "DITOLAK") rows.push("Posisi akhir: Perlu perbaikan");
+  else if(stAkhir === "MENUNGGU" && d.tanggal_revisi) rows.push("Posisi akhir: Menunggu verifikasi perbaikan");
+  else rows.push("Posisi akhir: Menunggu verifikasi");
+  return rows.join("\n");
+}
+function reportDokumenGroupedRowsV54(dokumen){
+  const grouped = {};
+  (dokumen || []).forEach(d => {
+    const id = String(d.id_kegiatan || "-");
+    if(!grouped[id]) grouped[id] = [];
+    grouped[id].push(d);
+  });
+  return Object.entries(grouped).map(([id, docs], i) => {
+    const first = docs[0] || {};
+    const dokList = docs.map((d,idx)=>`<div class="doc-report-item">
+      <b>${idx+1}. ${plainText(normalizeJenisDokumenLabel(d.jenis_dokumen))}</b><br>
+      File: ${plainText(d.nama_file || "-")} ${d.url_file ? ` - ${htmlLink(d.url_file, "Buka File")}` : ""}<br>
+      Status Dokumen: <b>${plainText(displayStatusText(d.status_verifikasi || "MENUNGGU"))}</b><br>
+      Catatan Verifikator: ${plainText(reportCatatanDokumenV54(d))}<br>
+      Tahapan: ${plainText(reportTahapanDokumenRingkasV54(d)).replace(/\n/g,"<br>")}
+    </div>`).join("");
+    return `<tr>
+      <td>${i+1}</td>
+      <td>${plainText(bidangName(first.id_bidang))}</td>
+      <td>${plainText(kegiatanName(id))}<br><span class="small">${plainText(id)}</span></td>
+      <td class="status">${plainText(reportGroupDocStatusV54(docs))}</td>
+      <td class="status">${plainText(reportGroupPencairanStatusV54(id, docs))}</td>
+      <td>${docs.length} dokumen</td>
+      <td>${dokList}</td>
+    </tr>`;
+  }).join("");
+}
+function downloadDashboardPDF(){
+  const userBidang = String(currentUser?.id_bidang || "");
+  const semuaBidang = canSeeAll();
+  const rekap = semuaBidang ? (dashboard.rekap || []) : (dashboard.rekap || []).filter(r => String(r.id_bidang) === userBidang);
+  const perencanaan = semuaBidang ? (dashboard.perencanaan || []) : (dashboard.perencanaan || []).filter(k => String(k.id_bidang) === userBidang);
+  const dokumen = semuaBidang ? (dashboard.dokumen || []) : (dashboard.dokumen || []).filter(d => String(d.id_bidang) === userBidang);
+  const pagu = rekap.reduce((s,r)=>s+toNumber(r.pagu),0);
+  const total = rekap.reduce((s,r)=>s+toNumber(r.total_perencanaan),0);
+  const sisa = pagu - total;
+  const valid = dokumen.filter(d=>isDocValidKeuanganV70(d)).length;
+  const perbaikanDok = dokumen.filter(d=>["PERBAIKAN","DITOLAK"].includes(String(d.status_verifikasi||"").toUpperCase())).length;
+  const menungguDok = dokumen.filter(d=>["","MENUNGGU"].includes(String(d.status_verifikasi||"").toUpperCase())).length;
+  const perluPersetujuan = perencanaan.filter(k => ["DIAJUKAN","PERUBAHAN_DIAJUKAN"].includes(String(k.status_perencanaan||"").toUpperCase())).length;
+  const perluPerbaikanRencana = perencanaan.filter(k => String(k.status_perencanaan||"").toUpperCase()==="DITOLAK").length;
+  const bidangOver = rekap.filter(r => toNumber(r.sisa_pagu) < 0).length;
+
+  const rowsRekap = rekap.map((r,i)=>`<tr><td>${i+1}</td><td>${plainText(r.nama_bidang)}<br><span class="small">${plainText(r.id_bidang)}</span></td><td>${rupiah(r.pagu)}</td><td>${rupiah(r.total_perencanaan)}</td><td class="${toNumber(r.sisa_pagu)<0?'red':''}">${rupiah(r.sisa_pagu)}</td><td>${plainText(r.jumlah_kegiatan||0)}</td><td>${plainText(r.dokumen_upload||0)}</td><td>${plainText(r.dokumen_valid||0)}</td><td>${plainText(r.status_akses||'-')}</td><td class="status">${plainText(toNumber(r.sisa_pagu)<0?'MELEBIHI PAGU':displayStatusText(r.status_progress||'-'))}</td></tr>`).join("");
+
+  const rowsPerencanaan = perencanaan.map((k,i)=>{
+    const jumlah = toNumber(k.jumlah || (toNumber(k.volume)*toNumber(k.harga_satuan)));
+    const posisi = typeof getRencanaPosisiSaatIni === "function" ? getRencanaPosisiSaatIni(k) : displayStatusText(k.status_perencanaan || "-");
+    const riwayat = reportRiwayatPerencanaan(k);
+    return `<tr><td>${i+1}</td><td>${plainText(k.id_kegiatan)}</td><td>${plainText(bidangName(k.id_bidang))}</td><td>${plainText(k.nama_kegiatan)}</td><td>${plainText(k.keterangan||'-')}</td><td>${plainText(k.volume||0)} ${plainText(k.satuan||'')}</td><td>${rupiah(k.harga_satuan)}</td><td>${rupiah(jumlah)}</td><td>${plainText(k.metode_pemilihan || metodePemilihanByNilai(jumlah))}</td><td>${plainText(k.waktu_pemilihan ? formatTanggalID(k.waktu_pemilihan) : "-")}</td><td class="status">${plainText(posisi)}</td><td>${plainText(formalReportText(riwayat)).replace(/\n/g,'<br>')}</td><td>${plainText(displayStatusText(getPencairanStatus(k.id_kegiatan)))}</td></tr>`;
+  }).join("");
+
+  const rowsDokumenGrouped = reportDokumenGroupedRowsV54(dokumen);
+
+  const body = `<div class="summary"><div class="card"><span>Total Pagu</span><b>${rupiah(pagu)}</b></div><div class="card"><span>Total Perencanaan</span><b>${rupiah(total)}</b></div><div class="card"><span>Sisa Pagu</span><b class="${sisa<0?'red':''}">${rupiah(sisa)}</b></div><div class="card"><span>Dokumen Valid</span><b>${valid}/${dokumen.length}</b></div><div class="card"><span>Perlu Pemeriksaan</span><b>${perluPersetujuan} rencana / ${menungguDok} dokumen</b></div></div>
+  <div class="note"><b>Ringkasan Pemeriksaan:</b> ${perluPerbaikanRencana} perencanaan perlu perbaikan, ${perbaikanDok} dokumen perlu perbaikan, ${bidangOver} bidang melebihi pagu.</div>
+  <h3>1. Rekapitulasi Anggaran per Bidang</h3><table><thead><tr><th>No</th><th>Bidang</th><th>Pagu</th><th>Perencanaan</th><th>Sisa</th><th>Kegiatan</th><th>Dok Upload</th><th>Dok Valid</th><th>Akses</th><th>Progress</th></tr></thead><tbody>${rowsRekap || `<tr><td colspan="10">Belum ada data</td></tr>`}</tbody></table>
+  <h3>2. Rekap Data Perencanaan dan Riwayat Pemeriksaan</h3><table><thead><tr><th>No</th><th>ID Kegiatan</th><th>Bidang</th><th>Nama Kegiatan</th><th>Keterangan</th><th>Volume</th><th>Harga Satuan</th><th>Jumlah</th><th>Metode</th><th>Waktu Pemilihan</th><th>Posisi Saat Ini</th><th>Riwayat Perencanaan</th><th>Status Pencairan</th></tr></thead><tbody>${rowsPerencanaan || `<tr><td colspan="13">Belum ada data perencanaan</td></tr>`}</tbody></table>
+  <h3>3. Rekap Dokumen Pencairan per Kegiatan</h3><table><thead><tr><th>No</th><th>Bidang</th><th>Kegiatan</th><th>Status Dokumen Kegiatan</th><th>Status Pencairan Kegiatan</th><th>Jumlah Dokumen</th><th>Rincian Dokumen dan Tahapan Proses</th></tr></thead><tbody>${rowsDokumenGrouped || `<tr><td colspan="7">Belum ada dokumen pencairan</td></tr>`}</tbody></table>`;
+
+  openReportWindow(semuaBidang ? "Laporan Monitoring Keseluruhan SIMPROV" : "Laporan Monitoring Bidang " + (currentUser?.nama_bidang || currentUser?.nama || ""), body);
+}
+
+
+/* =========================
+   SIMPROV v55 final override
+   Laporan untuk Admin/SEKDA/Auditor juga wajib memakai format terbaru:
+   - dokumen dikelompokkan per kegiatan
+   - riwayat dokumen ringkas tahapan
+   - status pencairan kegiatan mengacu status dokumen kegiatan
+   ========================= */
+function reportCatatanDokumenV55(d){
+  return d.catatan_Verifikator || d.catatan_admin || d.catatan || "-";
+}
+function reportDocStatusRawV55(d){
+  return String(d.status_verifikasi || "MENUNGGU").toUpperCase();
+}
+function reportGroupDocStatusV55(docs){
+  if(!docs || !docs.length) return "BELUM ADA DOKUMEN";
+  if(docs.some(d => ["PERBAIKAN","DITOLAK"].includes(reportDocStatusRawV55(d)))) return "PERLU PERBAIKAN";
+  if(docs.every(d => reportDocStatusRawV55(d) === "VALID")) return "SUDAH DIVERIFIKASI";
+  return "MENUNGGU VERIFIKASI";
+}
+function reportGroupPencairanStatusV55(idKegiatan, docs){
+  const st = reportGroupDocStatusV55(docs);
+  if(st === "SUDAH DIVERIFIKASI") return "SUDAH DIVERIFIKASI";
+  if(st === "PERLU PERBAIKAN") return "PERLU PERBAIKAN";
+  if(st === "MENUNGGU VERIFIKASI") return "MENUNGGU VERIFIKASI";
+  return displayStatusText(getPencairanStatus(idKegiatan));
+}
+function reportTahapanDokumenRingkasV55(d){
+  const rows = [];
+  rows.push(`Upload awal: ${formatTanggalJam(d.tanggal_upload)} oleh ${d.upload_by || "-"}`);
+
+  if(d.tanggal_verifikasi || d.verifikasi_by || reportCatatanDokumenV55(d) !== "-"){
+    const st = reportDocStatusRawV55(d);
+    const hasil = st === "VALID" ? "Dokumen valid" : (st === "PERBAIKAN" || st === "DITOLAK" ? "Perlu perbaikan" : displayStatusText(st));
+    rows.push(`Pemeriksaan Verifikator: ${formatTanggalJam(d.tanggal_verifikasi)} oleh ${d.verifikasi_by || "-"} - ${hasil}${reportCatatanDokumenV55(d) !== "-" ? " (" + reportCatatanDokumenV55(d) + ")" : ""}`);
+  }
+
+  if(d.tanggal_revisi || d.revisi_by){
+    rows.push(`Upload ulang/perbaikan: ${formatTanggalJam(d.tanggal_revisi)} oleh ${d.revisi_by || "-"}`);
+  }
+
+  const stAkhir = reportDocStatusRawV55(d);
+  if(stAkhir === "VALID") rows.push("Posisi akhir: Sudah diverifikasi");
+  else if(stAkhir === "PERBAIKAN" || stAkhir === "DITOLAK") rows.push("Posisi akhir: Perlu perbaikan");
+  else if(stAkhir === "MENUNGGU" && d.tanggal_revisi) rows.push("Posisi akhir: Menunggu verifikasi perbaikan");
+  else rows.push("Posisi akhir: Menunggu verifikasi");
+
+  return rows.join("\n");
+}
+function reportRiwayatPerencanaanV55(k){
+  if(typeof reportRiwayatPerencanaan === "function"){
+    return reportRiwayatPerencanaan(k);
+  }
+  const posisi = typeof getRencanaPosisiSaatIni === "function" ? getRencanaPosisiSaatIni(k) : displayStatusText(k.status_perencanaan || "-");
+  const rows = [];
+  rows.push(`Posisi saat ini: ${posisi}`);
+  rows.push(`Input perencanaan: ${formatTanggalJam(k.tanggal_input)} oleh ${k.input_by || bidangName(k.id_bidang) || "-"}`);
+  if(k.alasan_penolakan) rows.push(`Hasil pemeriksaan Verifikator: Perlu perbaikan - ${k.alasan_penolakan}`);
+  if(k.riwayat_perubahan) rows.push(String(k.riwayat_perubahan).replace(/\bADMIN\b/g,"Verifikator").replace(/\bAdmin\b/g,"Verifikator"));
+  return rows.join("\n");
+}
+function reportDokumenGroupedRowsV55(dokumen){
+  const grouped = {};
+  (dokumen || []).forEach(d => {
+    const id = String(d.id_kegiatan || "-");
+    if(!grouped[id]) grouped[id] = [];
+    grouped[id].push(d);
+  });
+
+  return Object.entries(grouped).map(([id, docs], i) => {
+    const first = docs[0] || {};
+    const valid = docs.filter(d => reportDocStatusRawV55(d) === "VALID").length;
+    const dokList = docs.map((d,idx)=>`<div class="doc-report-item">
+      <b>${idx+1}. ${plainText(normalizeJenisDokumenLabel(d.jenis_dokumen))}</b><br>
+      File: ${plainText(d.nama_file || "-")} ${d.url_file ? ` - ${htmlLink(d.url_file, "Buka File")}` : ""}<br>
+      Status Dokumen: <b>${plainText(displayStatusText(d.status_verifikasi || "MENUNGGU"))}</b><br>
+      Catatan Verifikator: ${plainText(reportCatatanDokumenV55(d))}<br>
+      Tahapan: ${plainText(reportTahapanDokumenRingkasV55(d)).replace(/\n/g,"<br>")}
+    </div>`).join("");
+
+    return `<tr>
+      <td>${i+1}</td>
+      <td>${plainText(bidangName(first.id_bidang))}</td>
+      <td>${plainText(kegiatanName(id))}<br><span class="small">${plainText(id)}</span></td>
+      <td class="status">${plainText(reportGroupDocStatusV55(docs))}</td>
+      <td class="status">${plainText(reportGroupPencairanStatusV55(id, docs))}</td>
+      <td>${valid}/${docs.length} valid</td>
+      <td>${dokList}</td>
+    </tr>`;
+  }).join("");
+}
+function buildMonitoringReportBodyV55(semuaBidang){
+  const userBidang = String(currentUser?.id_bidang || "");
+  const rekap = semuaBidang ? (dashboard.rekap || []) : (dashboard.rekap || []).filter(r => String(r.id_bidang) === userBidang);
+  const perencanaan = semuaBidang ? (dashboard.perencanaan || []) : (dashboard.perencanaan || []).filter(k => String(k.id_bidang) === userBidang);
+  const dokumen = semuaBidang ? (dashboard.dokumen || []) : (dashboard.dokumen || []).filter(d => String(d.id_bidang) === userBidang);
+
+  const pagu = rekap.reduce((s,r)=>s+toNumber(r.pagu),0);
+  const total = rekap.reduce((s,r)=>s+toNumber(r.total_perencanaan),0);
+  const sisa = pagu - total;
+  const valid = dokumen.filter(d=>isDocValidKeuanganV70(d)).length;
+  const perbaikanDok = dokumen.filter(d=>["PERBAIKAN","DITOLAK"].includes(String(d.status_verifikasi||"").toUpperCase())).length;
+  const menungguDok = dokumen.filter(d=>["","MENUNGGU"].includes(String(d.status_verifikasi||"").toUpperCase())).length;
+  const perluPersetujuan = perencanaan.filter(k => ["DIAJUKAN","PERUBAHAN_DIAJUKAN"].includes(String(k.status_perencanaan||"").toUpperCase())).length;
+  const perluPerbaikanRencana = perencanaan.filter(k => String(k.status_perencanaan||"").toUpperCase()==="DITOLAK").length;
+  const bidangOver = rekap.filter(r => toNumber(r.sisa_pagu) < 0).length;
+
+  const rowsRekap = rekap.map((r,i)=>`<tr>
+    <td>${i+1}</td>
+    <td>${plainText(r.nama_bidang)}<br><span class="small">${plainText(r.id_bidang)}</span></td>
+    <td>${rupiah(r.pagu)}</td>
+    <td>${rupiah(r.total_perencanaan)}</td>
+    <td class="${toNumber(r.sisa_pagu)<0?'red':''}">${rupiah(r.sisa_pagu)}</td>
+    <td>${plainText(r.jumlah_kegiatan||0)}</td>
+    <td>${plainText(r.dokumen_upload||0)}</td>
+    <td>${plainText(r.dokumen_valid||0)}</td>
+    <td>${plainText(r.status_akses||'-')}</td>
+    <td class="status">${plainText(toNumber(r.sisa_pagu)<0?'MELEBIHI PAGU':displayStatusText(r.status_progress||'-'))}</td>
+  </tr>`).join("");
+
+  const rowsPerencanaan = perencanaan.map((k,i)=>{
+    const jumlah = toNumber(k.jumlah || (toNumber(k.volume)*toNumber(k.harga_satuan)));
+    const posisi = typeof getRencanaPosisiSaatIni === "function" ? getRencanaPosisiSaatIni(k) : displayStatusText(k.status_perencanaan || "-");
+    const riwayat = reportRiwayatPerencanaanV55(k);
+    return `<tr>
+      <td>${i+1}</td>
+      <td>${plainText(k.id_kegiatan)}</td>
+      <td>${plainText(bidangName(k.id_bidang))}</td>
+      <td>${plainText(k.nama_kegiatan)}</td>
+      <td>${plainText(k.keterangan||'-')}</td>
+      <td>${plainText(k.volume||0)} ${plainText(k.satuan||'')}</td>
+      <td>${rupiah(k.harga_satuan)}</td>
+      <td>${rupiah(jumlah)}</td>
+      <td>${plainText(k.metode_pemilihan || metodePemilihanByNilai(jumlah))}</td>
+      <td>${plainText(k.waktu_pemilihan ? formatTanggalID(k.waktu_pemilihan) : "-")}</td>
+      <td class="status">${plainText(posisi)}</td>
+      <td>${plainText(formalReportText(riwayat)).replace(/\n/g,'<br>')}</td>
+      <td>${plainText(displayStatusText(getPencairanStatus(k.id_kegiatan)))}</td>
+    </tr>`;
+  }).join("");
+
+  const rowsDokumenGrouped = reportDokumenGroupedRowsV55(dokumen);
+
+  return `<div class="summary">
+    <div class="card"><span>Total Pagu</span><b>${rupiah(pagu)}</b></div>
+    <div class="card"><span>Total Perencanaan</span><b>${rupiah(total)}</b></div>
+    <div class="card"><span>Sisa Pagu</span><b class="${sisa<0?'red':''}">${rupiah(sisa)}</b></div>
+    <div class="card"><span>Dokumen Valid</span><b>${valid}/${dokumen.length}</b></div>
+    <div class="card"><span>Perlu Pemeriksaan</span><b>${perluPersetujuan} rencana / ${menungguDok} dokumen</b></div>
+  </div>
+  <div class="note"><b>Ringkasan Pemeriksaan:</b> ${perluPerbaikanRencana} perencanaan perlu perbaikan, ${perbaikanDok} dokumen perlu perbaikan, ${bidangOver} bidang melebihi pagu.</div>
+
+  <h3>1. Rekapitulasi Anggaran per Bidang</h3>
+  <table><thead><tr><th>No</th><th>Bidang</th><th>Pagu</th><th>Perencanaan</th><th>Sisa</th><th>Kegiatan</th><th>Dok Upload</th><th>Dok Valid</th><th>Akses</th><th>Progress</th></tr></thead><tbody>${rowsRekap || `<tr><td colspan="10">Belum ada data</td></tr>`}</tbody></table>
+
+  <h3>2. Rekap Data Perencanaan dan Riwayat Pemeriksaan</h3>
+  <table><thead><tr><th>No</th><th>ID Kegiatan</th><th>Bidang</th><th>Nama Kegiatan</th><th>Keterangan</th><th>Volume</th><th>Harga Satuan</th><th>Jumlah</th><th>Metode</th><th>Waktu Pemilihan</th><th>Posisi Saat Ini</th><th>Riwayat Perencanaan</th><th>Status Pencairan</th></tr></thead><tbody>${rowsPerencanaan || `<tr><td colspan="13">Belum ada data perencanaan</td></tr>`}</tbody></table>
+
+  <h3>3. Rekap Dokumen Pencairan per Kegiatan</h3>
+  <table><thead><tr><th>No</th><th>Bidang</th><th>Kegiatan</th><th>Status Dokumen Kegiatan</th><th>Status Pencairan Kegiatan</th><th>Dokumen Valid</th><th>Rincian Dokumen dan Tahapan Proses</th></tr></thead><tbody>${rowsDokumenGrouped || `<tr><td colspan="7">Belum ada dokumen pencairan</td></tr>`}</tbody></table>`;
+}
+function downloadDashboardPDF(){
+  const semuaBidang = canSeeAll();
+  const title = semuaBidang ? "Laporan Monitoring Keseluruhan SIMPROV" : "Laporan Monitoring Bidang " + (currentUser?.nama_bidang || currentUser?.nama || "");
+  openReportWindow(title, buildMonitoringReportBodyV55(semuaBidang));
+}
+function renderLaporan(){
+  const semuaBidang = canSeeAll();
+  const title = semuaBidang ? "Laporan Monitoring Keseluruhan SIMPROV" : "Laporan Monitoring Bidang " + (currentUser?.nama_bidang || currentUser?.nama || "");
+  openReportWindow(title, buildMonitoringReportBodyV55(semuaBidang));
+}
+function cetakLaporan(){ downloadDashboardPDF(); }
+function generateReport(){ downloadDashboardPDF(); }
+function downloadLaporanPDF(){ downloadDashboardPDF(); }
+
+
+/* =========================
+   SIMPROV v56 final override
+   Validasi tombol dokumen Verifikator:
+   - Jika dokumen sudah VALID, tombol Valid/Perbaikan nonaktif.
+   - Jika dokumen status PERBAIKAN/DITOLAK, Verifikator menunggu user upload ulang, tombol nonaktif.
+   - Jika dokumen MENUNGGU, tombol Valid/Perbaikan aktif.
+   ========================= */
+function canVerifyDocumentNowV56(d){
+  const st = String(d?.status_verifikasi || "MENUNGGU").toUpperCase();
+  return st === "MENUNGGU" || st === "";
+}
+function docActionInfoV56(d){
+  const st = String(d?.status_verifikasi || "MENUNGGU").toUpperCase();
+  if(st === "VALID"){
+    return {active:false, label:"Dokumen sudah valid", cls:"valid"};
+  }
+  if(st === "PERBAIKAN" || st === "DITOLAK"){
+    return {active:false, label:"Menunggu upload perbaikan dari bidang", cls:"repair"};
+  }
+  return {active:true, label:"Menunggu verifikasi", cls:"wait"};
+}
+function renderDokumenGroupRow(g){
+  const stGroup = groupDocStatus(g);
+  const stCair = getPencairanStatus(g.id_kegiatan);
+  const isCollapsed = docGroupCollapse[g.id_kegiatan] === undefined ? false : !!docGroupCollapse[g.id_kegiatan];
+
+  const docsHtml = (g.docs || []).map(d => {
+    const st = String(d.status_verifikasi || 'MENUNGGU').toUpperCase();
+    const info = docActionInfoV56(d);
+    let actionHtml = `<span class="muted">-</span>`;
+
+    if(canManage()){
+      if(info.active){
+        actionHtml = `<div class="doc-file-actions v39-file-actions">
+          <button class="btn-mini btn-green" onclick="verifDok('${esc(d.id_dokumen)}','VALID')">Valid</button>
+          <button class="btn-mini btn-orange" onclick="mintaPerbaikanDok('${esc(d.id_dokumen)}')">Perbaikan</button>
+        </div>`;
+      }else{
+        actionHtml = `<div class="doc-file-actions v56-disabled-actions">
+          <span class="doc-action-lock ${esc(info.cls)}">${esc(info.label)}</span>
+          <button class="btn-mini btn-disabled" disabled>Valid</button>
+          <button class="btn-mini btn-disabled" disabled>Perbaikan</button>
+        </div>`;
+      }
+    } else if(isReviewer()){
+      actionHtml = `<span class="audit-pill">Read-only</span>`;
+    } else if(st === 'PERBAIKAN' || st === 'DITOLAK'){
+      actionHtml = `<div class="doc-action-box per-file-revision compact-revision">
+        <div class="revision-title">Upload Ulang</div>
+        <input type="file" id="revisi_${esc(d.id_dokumen)}">
+        <button class="btn-mini btn-upload-ulang" onclick="revisiDokumen('${esc(d.id_dokumen)}')">Kirim File</button>
+      </div>`;
+    }
+
+    return `<div class="doc-item doc-item-v47 ${st==='PERBAIKAN'||st==='DITOLAK'?'doc-item-repair':''}">
+      <div class="doc-main-info">
+        <b>${esc(normalizeJenisDokumenLabel(d.jenis_dokumen) || '-')}</b>
+        <small class="muted">${esc(d.nama_file || '-')}</small>
+      </div>
+      <div class="doc-link">${d.url_file?`<a href="${esc(d.url_file)}" target="_blank">Buka File</a>`:esc(d.nama_file || '-')}</div>
+      <div class="doc-status">${badge(d.status_verifikasi || 'MENUNGGU')}</div>
+      <div class="doc-file-note-action compact-status-action">
+        <button class="btn-mini btn-detail" onclick="openDocStatusModal('${esc(d.id_dokumen)}')">Lihat Status</button>
+        ${(d.catatan_Verifikator || d.catatan_admin) ? `<span class="doc-alert-text">Ada catatan Verifikator</span>` : ""}
+        ${actionHtml}
+      </div>
+    </div>`;
+  }).join("");
+
+  return `<tr><td class="doc-group-card">
+    <div class="doc-group-head doc-group-head-v12">
+      <div class="doc-group-title"><b>${esc(kegiatanName(g.id_kegiatan))}</b><small>${esc(g.id_kegiatan)}</small></div>
+      <div><small class="muted">Bidang</small><br><b>${esc(bidangName(g.id_bidang))}</b></div>
+      <div><small class="muted">Status Dokumen</small><br>${badge(stGroup)}</div>
+      <div><small class="muted">Status Pencairan</small><br>${badge(stCair)}</div>
+      <div class="doc-toggle-wrap"><button class="btn-mini btn-detail" onclick="toggleDocGroup('${esc(g.id_kegiatan)}')">${isCollapsed ? 'Lihat Rincian' : 'Minimize'}</button></div>
+    </div>
+    <div class="doc-list ${isCollapsed ? 'hidden' : ''}">${docsHtml}</div>
+    <div class="doc-group-head doc-group-foot-v12 v69-final-action" style="border-top:1px solid #e8f1f7;border-bottom:0">
+      <div class="group-reason"><b>Rekap:</b> ${(g.docs||[]).length} file dokumen. ${isCollapsed ? 'Klik Lihat Rincian untuk membuka daftar file.' : 'Validasi/perbaikan hanya aktif untuk dokumen yang berstatus MENUNGGU.'}</div>
+      <div></div><div></div><div></div><span class="muted">-</span>
+    </div>
+  </td></tr>`;
+}
+async function verifDok(id, status){
+  const d = (dashboard?.dokumen || []).find(x => String(x.id_dokumen) === String(id));
+  if(d && !canVerifyDocumentNowV56(d)){
+    alert(String(d.status_verifikasi || "").toUpperCase() === "VALID" ? "Dokumen sudah valid." : "Dokumen masih menunggu upload perbaikan dari bidang.");
+    return;
+  }
+  showLoading("Verifikasi dokumen...");
+  try{
+    const r=await apiPost({action:"verifyDokumen", user:currentUser, id_dokumen:id, status_verifikasi:status, catatan_admin:"", catatan_Verifikator:""});
+    alert(r.message); if(r.success) await loadDashboard(false);
+  }catch(e){alert(e.message)}finally{hideLoading();}
+}
+async function mintaPerbaikanDok(id){
+  const d = (dashboard?.dokumen || []).find(x => String(x.id_dokumen) === String(id));
+  if(d && !canVerifyDocumentNowV56(d)){
+    alert(String(d.status_verifikasi || "").toUpperCase() === "VALID" ? "Dokumen sudah valid." : "Dokumen masih menunggu upload perbaikan dari bidang.");
+    return;
+  }
+  const catatan = prompt("Alasan perbaikan dokumen wajib diisi:");
+  if(!catatan || !String(catatan).trim()){ alert("Alasan perbaikan wajib diisi."); return; }
+  showLoading("Mengirim status perbaikan...");
+  try{
+    const r=await apiPost({action:"verifyDokumen", user:currentUser, id_dokumen:id, status_verifikasi:"PERBAIKAN", catatan_admin:String(catatan).trim(), catatan_Verifikator:String(catatan).trim()});
+    alert(r.message); if(r.success) await loadDashboard(false);
+  }catch(e){alert(e.message)}finally{hideLoading();}
+}
+
+
+/* =========================
+   SIMPROV v57 final override
+   Tombol aksi perencanaan user:
+   - Pengajuan awal: Edit + Hapus tetap aktif.
+   - Perlu Perbaikan: Ajukan Perbaikan, tanpa Hapus.
+   - Setelah perbaikan diajukan ulang / Menunggu verifikasi perbaikan: Edit masih boleh untuk koreksi ulang, Hapus nonaktif agar riwayat tidak hilang.
+   ========================= */
+function isRencanaProsesPerbaikanV57(k){
+  const st = String(k?.status_perencanaan || "DIAJUKAN").toUpperCase();
+  const riw = String(k?.riwayat_perubahan || "").toLowerCase();
+  return st === "DITOLAK" || (st === "DIAJUKAN" && (k?.alasan_penolakan || riw.includes("perbaikan diajukan ulang") || riw.includes("perlu perbaikan")));
+}
+function rencanaStatusTampilV57(k){
+  const st = String(k?.status_perencanaan || "DIAJUKAN").toUpperCase();
+  if(st === "DIAJUKAN" && isRencanaProsesPerbaikanV57(k)) return "MENUNGGU VERIFIKASI PERBAIKAN";
+  return st;
+}
+function renderPerencanaanRow(k){
+  try{
+    k = k || {};
+    const st = String(k.status_perencanaan||"DIAJUKAN").toUpperCase();
+    const stTampil = rencanaStatusTampilV57(k);
+    const prosesPerbaikan = isRencanaProsesPerbaikanV57(k);
+    const locked = isKegiatanLocked(k);
+    const aksesBuka = aksesPerencanaanTerbuka();
+    const jumlah = toNumber(k.jumlah || (toNumber(k.volume)*toNumber(k.harga_satuan)));
+    const metode = k.metode_pemilihan || metodePemilihanByNilai(jumlah);
+    const waktu = k.waktu_pemilihan ? formatTanggalID(k.waktu_pemilihan) : "-";
+    const hasNote = !!(k.alasan_penolakan || k.alasan_perubahan || k.riwayat_perubahan || toNumber(k.perubahan_ke));
+    const note = `<button class="btn-mini btn-detail" onclick="openRencanaStatusModal('${esc(k.id_kegiatan)}')">${hasNote ? "Lihat Riwayat" : "Lihat"}</button>`;
+
+    let aksi = "";
+    if(canManage()){
+      if(st === "DIAJUKAN" || st === "PERUBAHAN_DIAJUKAN") aksi = `<button class="btn-mini btn-green" onclick="setujui('${esc(k.id_kegiatan)}')">Setujui</button><button class="btn-mini btn-orange" onclick="tolak('${esc(k.id_kegiatan)}')">Minta Perbaikan</button>`;
+      else aksi = `<span class="muted">-</span>`;
+    } else if(isReviewer()){
+      aksi = `<span class="audit-pill">Read-only</span>`;
+    } else if(locked){
+      aksi = `<span class="status-done-pill">Selesai</span>`;
+    } else if(!aksesBuka){
+      aksi = `<span class="lock-badge">Akses perencanaan ditutup</span>`;
+    } else {
+      if(st === "DITOLAK"){
+        aksi = `<button class="btn-mini btn-orange" onclick="openEditModal('${esc(k.id_kegiatan)}','repair')">Ajukan Perbaikan</button>`;
+      } else if(st === "DIAJUKAN" && prosesPerbaikan){
+        aksi = `<button class="btn-mini" onclick="openEditModal('${esc(k.id_kegiatan)}','repair')">Edit Perbaikan</button><span class="delete-locked-info">Hapus nonaktif</span>`;
+      } else if(st === "DIAJUKAN"){
+        aksi = `<button class="btn-mini" onclick="openEditModal('${esc(k.id_kegiatan)}','normal')">Edit</button><button class="btn-mini btn-red" onclick="hapusPerencanaan('${esc(k.id_kegiatan)}')">Hapus</button>`;
+      } else if(st === "DISETUJUI"){
+        aksi = `<button class="btn-mini btn-orange" onclick="openEditModal('${esc(k.id_kegiatan)}','change')">Ajukan Perubahan</button>`;
+      } else {
+        aksi = `<span class="muted">Menunggu Verifikator</span>`;
+      }
+    }
+
+    const perubahan = toNumber(k.perubahan_ke) ? `<br><small class="muted">Perubahan Ke-${toNumber(k.perubahan_ke)}</small>` : "";
+    const rowClass = locked ? "row-selesai" : (st === "DITOLAK" ? "row-perbaikan" : (prosesPerbaikan ? "row-menunggu-perbaikan" : "row-proses"));
+    return `<tr class="rencana-row ${rowClass}">
+      <td>${esc(k.id_kegiatan)}</td>
+      <td>${esc(bidangName(k.id_bidang))}</td>
+      <td><b>${esc(k.nama_kegiatan)}</b>${perubahan}</td>
+      <td>${esc(k.volume)}</td>
+      <td>${esc(k.satuan)}</td>
+      <td>${rupiah(k.harga_satuan)}</td>
+      <td><b>${rupiah(jumlah)}</b></td>
+      <td>${esc(metode)}</td>
+      <td>${esc(waktu)}</td>
+      <td>${badge(stTampil)}</td>
+      <td class="note-cell note-cell-popup">${note}</td>
+      <td class="nowrap aksi-perencanaan-v57">${aksi}</td>
+    </tr>`;
+  }catch(e){
+    console.error("ROW_PERENCANAAN_ERROR", e, k);
+    return `<tr class="rencana-row row-perbaikan"><td colspan="12">Data kegiatan ${esc(k?.id_kegiatan || "-")} perlu dicek. Detail: ${esc(e.message || e)}</td></tr>`;
+  }
+}
+
+
+/* =========================
+   SIMPROV v58 final override
+   Perbaikan tampilan aksi perencanaan:
+   - Status MENUNGGU VERIFIKASI PERBAIKAN hanya menampilkan tombol Edit Perbaikan.
+   - Label "Hapus nonaktif" dihapus agar tampilan lebih bersih.
+   ========================= */
+function renderPerencanaanRow(k){
+  try{
+    k = k || {};
+    const st = String(k.status_perencanaan||"DIAJUKAN").toUpperCase();
+    const stTampil = typeof rencanaStatusTampilV57 === "function" ? rencanaStatusTampilV57(k) : st;
+    const prosesPerbaikan = typeof isRencanaProsesPerbaikanV57 === "function" ? isRencanaProsesPerbaikanV57(k) : false;
+    const locked = isKegiatanLocked(k);
+    const aksesBuka = aksesPerencanaanTerbuka();
+    const jumlah = toNumber(k.jumlah || (toNumber(k.volume)*toNumber(k.harga_satuan)));
+    const metode = k.metode_pemilihan || metodePemilihanByNilai(jumlah);
+    const waktu = k.waktu_pemilihan ? formatTanggalID(k.waktu_pemilihan) : "-";
+    const hasNote = !!(k.alasan_penolakan || k.alasan_perubahan || k.riwayat_perubahan || toNumber(k.perubahan_ke));
+    const note = `<button class="btn-mini btn-detail" onclick="openRencanaStatusModal('${esc(k.id_kegiatan)}')">${hasNote ? "Lihat Riwayat" : "Lihat"}</button>`;
+
+    let aksi = "";
+    if(canManage()){
+      if(st === "DIAJUKAN" || st === "PERUBAHAN_DIAJUKAN") {
+        aksi = `<button class="btn-mini btn-green" onclick="setujui('${esc(k.id_kegiatan)}')">Setujui</button><button class="btn-mini btn-orange" onclick="tolak('${esc(k.id_kegiatan)}')">Minta Perbaikan</button>`;
+      } else {
+        aksi = `<span class="muted">-</span>`;
+      }
+    } else if(isReviewer()){
+      aksi = `<span class="audit-pill">Read-only</span>`;
+    } else if(locked){
+      aksi = `<span class="status-done-pill">Selesai</span>`;
+    } else if(!aksesBuka){
+      aksi = `<span class="lock-badge">Akses perencanaan ditutup</span>`;
+    } else {
+      if(st === "DITOLAK"){
+        aksi = `<button class="btn-mini btn-orange" onclick="openEditModal('${esc(k.id_kegiatan)}','repair')">Ajukan Perbaikan</button>`;
+      } else if(st === "DIAJUKAN" && prosesPerbaikan){
+        aksi = `<button class="btn-mini" onclick="openEditModal('${esc(k.id_kegiatan)}','repair')">Edit Perbaikan</button>`;
+      } else if(st === "DIAJUKAN"){
+        aksi = `<button class="btn-mini" onclick="openEditModal('${esc(k.id_kegiatan)}','normal')">Edit</button><button class="btn-mini btn-red" onclick="hapusPerencanaan('${esc(k.id_kegiatan)}')">Hapus</button>`;
+      } else if(st === "DISETUJUI"){
+        aksi = `<button class="btn-mini btn-orange" onclick="openEditModal('${esc(k.id_kegiatan)}','change')">Ajukan Perubahan</button>`;
+      } else {
+        aksi = `<span class="muted">Menunggu Verifikator</span>`;
+      }
+    }
+
+    const perubahan = toNumber(k.perubahan_ke) ? `<br><small class="muted">Perubahan Ke-${toNumber(k.perubahan_ke)}</small>` : "";
+    const rowClass = locked ? "row-selesai" : (st === "DITOLAK" ? "row-perbaikan" : (prosesPerbaikan ? "row-menunggu-perbaikan" : "row-proses"));
+
+    return `<tr class="rencana-row ${rowClass}">
+      <td>${esc(k.id_kegiatan)}</td>
+      <td>${esc(bidangName(k.id_bidang))}</td>
+      <td><b>${esc(k.nama_kegiatan)}</b>${perubahan}</td>
+      <td>${esc(k.volume)}</td>
+      <td>${esc(k.satuan)}</td>
+      <td>${rupiah(k.harga_satuan)}</td>
+      <td><b>${rupiah(jumlah)}</b></td>
+      <td>${esc(metode)}</td>
+      <td>${esc(waktu)}</td>
+      <td>${badge(stTampil)}</td>
+      <td class="note-cell note-cell-popup">${note}</td>
+      <td class="nowrap aksi-perencanaan-v58">${aksi}</td>
+    </tr>`;
+  }catch(e){
+    console.error("ROW_PERENCANAAN_ERROR", e, k);
+    return `<tr class="rencana-row row-perbaikan"><td colspan="12">Data kegiatan ${esc(k?.id_kegiatan || "-")} perlu dicek. Detail: ${esc(e.message || e)}</td></tr>`;
+  }
+}
+
+
+/* =========================
+   SIMPROV v59 final override
+   Menu Admin/Verifikator Pencairan:
+   - Hapus label kecil: Ada catatan Verifikator, Menunggu upload perbaikan dari bidang, Dokumen sudah valid.
+   - Tombol Valid/Perbaikan tetap nonaktif sesuai status, tapi tanpa label tambahan.
+   - Posisi Saat Ini pada popup dokumen status PERBAIKAN menjadi "Menunggu upload perbaikan dari bidang".
+   ========================= */
+function getDocPosisiSaatIni(d){
+  const st = String(d?.status_verifikasi || "MENUNGGU").toUpperCase();
+  if(st === "VALID") return "Sudah diverifikasi";
+  if(st === "PERBAIKAN" || st === "DITOLAK") return "Menunggu upload perbaikan dari bidang";
+  if(st === "MENUNGGU" && d?.tanggal_revisi) return "Menunggu verifikasi perbaikan";
+  return "Menunggu verifikasi";
+}
+function renderDokumenGroupRow(g){
+  const stGroup = groupDocStatus(g);
+  const stCair = getPencairanStatus(g.id_kegiatan);
+  const isCollapsed = docGroupCollapse[g.id_kegiatan] === undefined ? false : !!docGroupCollapse[g.id_kegiatan];
+
+  const docsHtml = (g.docs || []).map(d => {
+    const st = String(d.status_verifikasi || 'MENUNGGU').toUpperCase();
+    const canVerify = (st === "MENUNGGU" || st === "");
+    let actionHtml = `<span class="muted">-</span>`;
+
+    if(canManage()){
+      if(canVerify){
+        actionHtml = `<div class="doc-file-actions v59-file-actions">
+          <button class="btn-mini btn-green" onclick="verifDok('${esc(d.id_dokumen)}','VALID')">Valid</button>
+          <button class="btn-mini btn-orange" onclick="mintaPerbaikanDok('${esc(d.id_dokumen)}')">Perbaikan</button>
+        </div>`;
+      }else{
+        actionHtml = `<div class="doc-file-actions v59-file-actions">
+          <button class="btn-mini btn-disabled" disabled>Valid</button>
+          <button class="btn-mini btn-disabled" disabled>Perbaikan</button>
+        </div>`;
+      }
+    } else if(isReviewer()){
+      actionHtml = `<span class="audit-pill">Read-only</span>`;
+    } else if(st === 'PERBAIKAN' || st === 'DITOLAK'){
+      actionHtml = `<div class="doc-action-box per-file-revision compact-revision">
+        <div class="revision-title">Upload Ulang</div>
+        <input type="file" id="revisi_${esc(d.id_dokumen)}">
+        <button class="btn-mini btn-upload-ulang" onclick="revisiDokumen('${esc(d.id_dokumen)}')">Kirim File</button>
+      </div>`;
+    }
+
+    return `<div class="doc-item doc-item-v47 ${st==='PERBAIKAN'||st==='DITOLAK'?'doc-item-repair':''}">
+      <div class="doc-main-info">
+        <b>${esc(normalizeJenisDokumenLabel(d.jenis_dokumen) || '-')}</b>
+        <small class="muted">${esc(d.nama_file || '-')}</small>
+      </div>
+      <div class="doc-link">${d.url_file?`<a href="${esc(d.url_file)}" target="_blank">Buka File</a>`:esc(d.nama_file || '-')}</div>
+      <div class="doc-status">${badge(d.status_verifikasi || 'MENUNGGU')}</div>
+      <div class="doc-file-note-action compact-status-action v59-status-action">
+        <button class="btn-mini btn-detail" onclick="openDocStatusModal('${esc(d.id_dokumen)}')">Lihat Status</button>
+        ${actionHtml}
+      </div>
+    </div>`;
+  }).join("");
+
+  return `<tr><td class="doc-group-card">
+    <div class="doc-group-head doc-group-head-v12">
+      <div class="doc-group-title"><b>${esc(kegiatanName(g.id_kegiatan))}</b><small>${esc(g.id_kegiatan)}</small></div>
+      <div><small class="muted">Bidang</small><br><b>${esc(bidangName(g.id_bidang))}</b></div>
+      <div><small class="muted">Status Dokumen</small><br>${badge(stGroup)}</div>
+      <div><small class="muted">Status Pencairan</small><br>${badge(stCair)}</div>
+      <div class="doc-toggle-wrap"><button class="btn-mini btn-detail" onclick="toggleDocGroup('${esc(g.id_kegiatan)}')">${isCollapsed ? 'Lihat Rincian' : 'Minimize'}</button></div>
+    </div>
+    <div class="doc-list ${isCollapsed ? 'hidden' : ''}">${docsHtml}</div>
+    <div class="doc-group-head doc-group-foot-v12 v69-final-action" style="border-top:1px solid #e8f1f7;border-bottom:0">
+      <div class="group-reason"><b>Rekap:</b> ${(g.docs||[]).length} file dokumen. Validasi/perbaikan aktif hanya untuk dokumen berstatus MENUNGGU.</div>
+      <div></div><div></div><div></div><span class="muted">-</span>
+    </div>
+  </td></tr>`;
+}
+async function verifDok(id, status){
+  const d = (dashboard?.dokumen || []).find(x => String(x.id_dokumen) === String(id));
+  const st = String(d?.status_verifikasi || "MENUNGGU").toUpperCase();
+  if(d && !(st === "MENUNGGU" || st === "")){
+    alert(st === "VALID" ? "Dokumen sudah valid." : "Posisi saat ini menunggu upload perbaikan dari bidang.");
+    return;
+  }
+  showLoading("Verifikasi dokumen...");
+  try{
+    const r=await apiPost({action:"verifyDokumen", user:currentUser, id_dokumen:id, status_verifikasi:status, catatan_admin:"", catatan_Verifikator:""});
+    alert(r.message); if(r.success) await loadDashboard(false);
+  }catch(e){alert(e.message)}finally{hideLoading();}
+}
+async function mintaPerbaikanDok(id){
+  const d = (dashboard?.dokumen || []).find(x => String(x.id_dokumen) === String(id));
+  const st = String(d?.status_verifikasi || "MENUNGGU").toUpperCase();
+  if(d && !(st === "MENUNGGU" || st === "")){
+    alert(st === "VALID" ? "Dokumen sudah valid." : "Posisi saat ini menunggu upload perbaikan dari bidang.");
+    return;
+  }
+  const catatan = prompt("Catatan perbaikan dokumen wajib diisi:");
+  if(!catatan || !String(catatan).trim()){ alert("Catatan perbaikan wajib diisi."); return; }
+  showLoading("Mengirim status perbaikan...");
+  try{
+    const r=await apiPost({action:"verifyDokumen", user:currentUser, id_dokumen:id, status_verifikasi:"PERBAIKAN", catatan_admin:String(catatan).trim(), catatan_Verifikator:String(catatan).trim()});
+    alert(r.message); if(r.success) await loadDashboard(false);
+  }catch(e){alert(e.message)}finally{hideLoading();}
+}
+
+
+/* =========================
+   SIMPROV v60 final override
+   Warna status dibuat lebih jelas:
+   - Hijau  : Disetujui / Valid / Selesai
+   - Merah  : Perlu Perbaikan / Ditolak / Perbaikan Dokumen
+   - Biru   : Diajukan / Menunggu Verifikasi
+   - Kuning : Menunggu Verifikasi Perbaikan / Perubahan Diajukan
+   ========================= */
+function statusColorClassV60(v){
+  const s = String(v || "").toUpperCase().trim();
+  if(["DISETUJUI","VALID","SELESAI","DOKUMEN LENGKAP","SUDAH DIVERIFIKASI","SUDAH DIVALIDASI"].includes(s)) return "status-green";
+  if(["DITOLAK","PERLU PERBAIKAN","PERBAIKAN","PERBAIKAN DOKUMEN","MELEBIHI PAGU"].includes(s)) return "status-red";
+  if(["MENUNGGU VERIFIKASI PERBAIKAN","MENUNGGU UPLOAD PERBAIKAN DARI BIDANG","PERUBAHAN_DIAJUKAN","PERUBAHAN DIAJUKAN"].includes(s)) return "status-yellow";
+  if(["DIAJUKAN","MENUNGGU","MENUNGGU VERIFIKASI","MENUNGGU VERIFIKASI PERENCANAAN","BELUM ADA DOKUMEN"].includes(s)) return "status-blue";
+  if(["BELUM INPUT","BELUM ADA DATA"].includes(s)) return "status-gray";
+  if(["BUKA","AKTIF"].includes(s)) return "status-green-soft";
+  if(["TUTUP","NONAKTIF"].includes(s)) return "status-red-soft";
+  return "status-gray";
+}
+function displayStatusTextV60(v){
+  const s = String(v || "-").toUpperCase().trim();
+  const map = {
+    "DIAJUKAN":"DIAJUKAN",
+    "DISETUJUI":"DISETUJUI",
+    "DITOLAK":"PERLU PERBAIKAN",
+    "PERBAIKAN":"PERLU PERBAIKAN",
+    "PERUBAHAN_DIAJUKAN":"MENUNGGU VERIFIKASI PERUBAHAN",
+    "MENUNGGU":"MENUNGGU VERIFIKASI",
+    "VALID":"VALID",
+    "BELUM_INPUT":"BELUM INPUT"
+  };
+  return map[s] || s.replace(/_/g," ");
+}
+function badge(v){
+  const text = displayStatusTextV60(v);
+  const cls = statusColorClassV60(text);
+  return `<span class="status-badge-v60 ${cls}">${esc(text)}</span>`;
+}
+function getRencanaRowClassV60(k){
+  const stText = typeof rencanaStatusTampilV57 === "function" ? rencanaStatusTampilV57(k) : String(k?.status_perencanaan || "DIAJUKAN").toUpperCase();
+  const cls = statusColorClassV60(stText);
+  if(cls === "status-green") return "row-status-green";
+  if(cls === "status-red") return "row-status-red";
+  if(cls === "status-yellow") return "row-status-yellow";
+  if(cls === "status-blue") return "row-status-blue";
+  return "row-status-gray";
+}
+function renderPerencanaanRow(k){
+  try{
+    k = k || {};
+    const st = String(k.status_perencanaan||"DIAJUKAN").toUpperCase();
+    const stTampil = typeof rencanaStatusTampilV57 === "function" ? rencanaStatusTampilV57(k) : st;
+    const prosesPerbaikan = typeof isRencanaProsesPerbaikanV57 === "function" ? isRencanaProsesPerbaikanV57(k) : false;
+    const locked = isKegiatanLocked(k);
+    const aksesBuka = aksesPerencanaanTerbuka();
+    const jumlah = toNumber(k.jumlah || (toNumber(k.volume)*toNumber(k.harga_satuan)));
+    const metode = k.metode_pemilihan || metodePemilihanByNilai(jumlah);
+    const waktu = k.waktu_pemilihan ? formatTanggalID(k.waktu_pemilihan) : "-";
+    const hasNote = !!(k.alasan_penolakan || k.alasan_perubahan || k.riwayat_perubahan || toNumber(k.perubahan_ke));
+    const note = `<button class="btn-mini btn-detail" onclick="openRencanaStatusModal('${esc(k.id_kegiatan)}')">${hasNote ? "Lihat Riwayat" : "Lihat"}</button>`;
+
+    let aksi = "";
+    if(canManage()){
+      if(st === "DIAJUKAN" || st === "PERUBAHAN_DIAJUKAN") {
+        aksi = `<button class="btn-mini btn-green" onclick="setujui('${esc(k.id_kegiatan)}')">Setujui</button><button class="btn-mini btn-orange" onclick="tolak('${esc(k.id_kegiatan)}')">Minta Perbaikan</button>`;
+      } else {
+        aksi = `<span class="muted">-</span>`;
+      }
+    } else if(isReviewer()){
+      aksi = `<span class="audit-pill">Read-only</span>`;
+    } else if(locked){
+      aksi = `<span class="status-done-pill">Selesai</span>`;
+    } else if(!aksesBuka){
+      aksi = `<span class="lock-badge">Akses perencanaan ditutup</span>`;
+    } else {
+      if(st === "DITOLAK"){
+        aksi = `<button class="btn-mini btn-orange" onclick="openEditModal('${esc(k.id_kegiatan)}','repair')">Ajukan Perbaikan</button>`;
+      } else if(st === "DIAJUKAN" && prosesPerbaikan){
+        aksi = `<button class="btn-mini" onclick="openEditModal('${esc(k.id_kegiatan)}','repair')">Edit Perbaikan</button>`;
+      } else if(st === "DIAJUKAN"){
+        aksi = `<button class="btn-mini" onclick="openEditModal('${esc(k.id_kegiatan)}','normal')">Edit</button><button class="btn-mini btn-red" onclick="hapusPerencanaan('${esc(k.id_kegiatan)}')">Hapus</button>`;
+      } else if(st === "DISETUJUI"){
+        aksi = `<button class="btn-mini btn-orange" onclick="openEditModal('${esc(k.id_kegiatan)}','change')">Ajukan Perubahan</button>`;
+      } else {
+        aksi = `<span class="muted">Menunggu Verifikator</span>`;
+      }
+    }
+
+    const perubahan = toNumber(k.perubahan_ke) ? `<br><small class="muted">Perubahan Ke-${toNumber(k.perubahan_ke)}</small>` : "";
+    const rowClass = locked ? "row-status-green" : getRencanaRowClassV60(k);
+
+    return `<tr class="rencana-row ${rowClass}">
+      <td>${esc(k.id_kegiatan)}</td>
+      <td>${esc(bidangName(k.id_bidang))}</td>
+      <td><b>${esc(k.nama_kegiatan)}</b>${perubahan}</td>
+      <td>${esc(k.volume)}</td>
+      <td>${esc(k.satuan)}</td>
+      <td>${rupiah(k.harga_satuan)}</td>
+      <td><b>${rupiah(jumlah)}</b></td>
+      <td>${esc(metode)}</td>
+      <td>${esc(waktu)}</td>
+      <td>${badge(stTampil)}</td>
+      <td class="note-cell note-cell-popup">${note}</td>
+      <td class="nowrap aksi-perencanaan-v58">${aksi}</td>
+    </tr>`;
+  }catch(e){
+    console.error("ROW_PERENCANAAN_ERROR", e, k);
+    return `<tr class="rencana-row row-status-red"><td colspan="12">Data kegiatan ${esc(k?.id_kegiatan || "-")} perlu dicek. Detail: ${esc(e.message || e)}</td></tr>`;
+  }
+}
+
+
+/* v60 legend helper */
+function injectStatusLegendV60(){
+  const panel = document.querySelector("#contentArea .panel, #contentArea section");
+  if(!panel || panel.querySelector(".status-legend-v60")) return;
+  const tableWrap = panel.querySelector(".table-wrap, table");
+  if(!tableWrap) return;
+  const legend = document.createElement("div");
+  legend.className = "status-legend-v60";
+  legend.innerHTML = `<span><i class="l-green"></i>Disetujui / valid</span><span><i class="l-red"></i>Perlu perbaikan</span><span><i class="l-blue"></i>Diajukan / menunggu verifikasi</span><span><i class="l-yellow"></i>Menunggu verifikasi perbaikan</span>`;
+  tableWrap.parentNode.insertBefore(legend, tableWrap);
+}
+if(typeof renderPerencanaan === "function" && !window.__renderPerencanaanV60Wrapped){
+  window.__renderPerencanaanV60Wrapped = true;
+  const __oldRenderPerencanaanV60 = renderPerencanaan;
+  renderPerencanaan = function(){
+    const r = __oldRenderPerencanaanV60.apply(this, arguments);
+    setTimeout(injectStatusLegendV60, 0);
+    return r;
+  }
+}
+
+
+/* =========================
+   SIMPROV v61 final override
+   Waktu Pemilihan wajib dan tidak hilang saat edit/perbaikan/perubahan.
+   Penyebab strip: data edit sebelumnya belum mengirim field waktu_pemilihan ke backend.
+   ========================= */
+function normalizeDateForInputV61(v){
+  const s = String(v || "").trim();
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // Format Indonesia dari tampilan lama, contoh: 10 Juli 2026
+  const bulan = {
+    januari:"01", februari:"02", maret:"03", april:"04", mei:"05", juni:"06",
+    juli:"07", agustus:"08", september:"09", oktober:"10", november:"11", desember:"12"
+  };
+  const m = s.toLowerCase().match(/^(\d{1,2})\s+([a-z]+)\s+(\d{4})$/);
+  if(m && bulan[m[2]]) return `${m[3]}-${bulan[m[2]]}-${String(m[1]).padStart(2,"0")}`;
+  return "";
+}
+function ensureWaktuRequiredV61(){
+  const w = document.getElementById("waktuPemilihan");
+  if(w){
+    w.required = true;
+    w.setAttribute("required","required");
+  }
+  const ew = document.getElementById("editWaktuPemilihan");
+  if(ew){
+    ew.required = true;
+    ew.setAttribute("required","required");
+  }
+}
+function openEditModal(id, mode){
+  const k = dashboard.perencanaan.find(x => String(x.id_kegiatan)===String(id)); if(!k) return;
+  if(isKegiatanLocked(k)){ alert("Kegiatan sudah selesai sampai validasi pencairan, perencanaan terkunci."); return; }
+  if(!aksesPerencanaanTerbuka()){ alert("Akses perencanaan bidang sedang ditutup Verifikator. Menu pencairan tetap bisa digunakan."); return; }
+
+  const realMode = mode === "repair" ? "normal" : mode;
+  document.getElementById("editMode").value = realMode;
+  document.getElementById("editIdKegiatan").value = k.id_kegiatan;
+  document.getElementById("editNamaKegiatan").value = k.nama_kegiatan || "";
+  document.getElementById("editKeterangan").value = k.keterangan || "";
+  document.getElementById("editVolume").value = angkaID(k.volume);
+  document.getElementById("editSatuan").value = k.satuan || "";
+  document.getElementById("editHarga").value = angkaID(k.harga_satuan);
+
+  const waktu = normalizeDateForInputV61(k.waktu_pemilihan);
+  if(document.getElementById("editWaktuPemilihan")) document.getElementById("editWaktuPemilihan").value = waktu;
+
+  document.getElementById("editAlasanPerubahan").value = "";
+  if(mode === "repair"){
+    document.getElementById("editModalTitle").innerText = "Ajukan Perbaikan Perencanaan";
+    document.getElementById("editModalSub").innerText = "Perbaiki data sesuai catatan Verifikator. Waktu pemilihan wajib diisi.";
+  } else {
+    document.getElementById("editModalTitle").innerText = mode === "change" ? `Ajukan Perubahan Perencanaan` : "Edit Perencanaan";
+    document.getElementById("editModalSub").innerText = mode === "change" ? `Perubahan akan masuk sebagai Perubahan Ke-${toNumber(k.perubahan_ke)+1} dan menunggu Verifikator.` : "Data akan diajukan kembali ke Verifikator.";
+  }
+  document.getElementById("alasanPerubahanWrap").classList.toggle("hidden", mode !== "change");
+  setAutoTotal("editVolume","editHarga","editTotalPreview");
+  ensureWaktuRequiredV61();
+  document.getElementById("editModal").classList.remove("hidden");
+}
+async function submitEditPerencanaan(){
+  showLoading("Menyimpan perubahan...");
+  const mode = document.getElementById("editMode").value;
+  const waktu = document.getElementById("editWaktuPemilihan")?.value || "";
+  if(!waktu){ hideLoading(); alert("Waktu pemilihan wajib diisi."); return; }
+
+  const data = {
+    id_kegiatan:document.getElementById("editIdKegiatan").value,
+    mode,
+    nama_kegiatan:document.getElementById("editNamaKegiatan").value,
+    rincian_kebutuhan:"",
+    keterangan:document.getElementById("editKeterangan").value,
+    volume:toNumber(document.getElementById("editVolume").value),
+    satuan:document.getElementById("editSatuan").value,
+    harga_satuan:toNumber(document.getElementById("editHarga").value),
+    waktu_pemilihan:waktu,
+    alasan_perubahan:document.getElementById("editAlasanPerubahan").value
+  };
+  const jumlah = toNumber(data.volume) * toNumber(data.harga_satuan);
+  const cek = cekPaguFrontend(jumlah, data.id_kegiatan);
+  if(!cek.ok){ hideLoading(); alert(cek.message); return; }
+  try{
+    const r = await apiPost({action:"updatePerencanaan", user:currentUser, data});
+    alert(r.message);
+    if(r.success){ closeEditModal(); await loadDashboard(false); }
+  }catch(e){alert(e.message)}finally{hideLoading();}
+}
+const __oldRenderPerencanaanV61 = typeof renderPerencanaan === "function" ? renderPerencanaan : null;
+if(__oldRenderPerencanaanV61 && !window.__renderPerencanaanV61Wrapped){
+  window.__renderPerencanaanV61Wrapped = true;
+  renderPerencanaan = function(){
+    const r = __oldRenderPerencanaanV61.apply(this, arguments);
+    setTimeout(ensureWaktuRequiredV61, 0);
+    return r;
+  };
+}
+
+
+/* =========================
+   SIMPROV v62 final override
+   Warna menu pencairan per kegiatan:
+   - Semua dokumen VALID = kartu kegiatan hijau.
+   - Ada dokumen PERBAIKAN/DITOLAK = kartu kegiatan merah.
+   - Masih menunggu verifikasi = kartu kegiatan biru.
+   ========================= */
+function docGroupColorClassV62(g){
+  const docs = g?.docs || [];
+  if(!docs.length) return "doc-group-gray";
+  const statuses = docs.map(d => String(d.status_verifikasi || "MENUNGGU").toUpperCase());
+  if(statuses.every(s => s === "VALID")) return "doc-group-green";
+  if(statuses.some(s => s === "PERBAIKAN" || s === "DITOLAK")) return "doc-group-red";
+  return "doc-group-blue";
+}
+function renderDokumenGroupRow(g){
+  const stGroup = groupDocStatus(g);
+  const stCair = getPencairanStatus(g.id_kegiatan);
+  const isCollapsed = docGroupCollapse[g.id_kegiatan] === undefined ? false : !!docGroupCollapse[g.id_kegiatan];
+  const colorClass = docGroupColorClassV62(g);
+
+  const docsHtml = (g.docs || []).map(d => {
+    const st = String(d.status_verifikasi || 'MENUNGGU').toUpperCase();
+    const canVerify = (st === "MENUNGGU" || st === "");
+    let actionHtml = `<span class="muted">-</span>`;
+
+    if(canManage()){
+      if(canVerify){
+        actionHtml = `<div class="doc-file-actions v59-file-actions">
+          <button class="btn-mini btn-green" onclick="verifDok('${esc(d.id_dokumen)}','VALID')">Valid</button>
+          <button class="btn-mini btn-orange" onclick="mintaPerbaikanDok('${esc(d.id_dokumen)}')">Perbaikan</button>
+        </div>`;
+      }else{
+        actionHtml = `<div class="doc-file-actions v59-file-actions">
+          <button class="btn-mini btn-disabled" disabled>Valid</button>
+          <button class="btn-mini btn-disabled" disabled>Perbaikan</button>
+        </div>`;
+      }
+    } else if(isReviewer()){
+      actionHtml = `<span class="audit-pill">Read-only</span>`;
+    } else if(st === 'PERBAIKAN' || st === 'DITOLAK'){
+      actionHtml = `<div class="doc-action-box per-file-revision compact-revision">
+        <div class="revision-title">Upload Ulang</div>
+        <input type="file" id="revisi_${esc(d.id_dokumen)}">
+        <button class="btn-mini btn-upload-ulang" onclick="revisiDokumen('${esc(d.id_dokumen)}')">Kirim File</button>
+      </div>`;
+    }
+
+    return `<div class="doc-item doc-item-v47 ${st==='PERBAIKAN'||st==='DITOLAK'?'doc-item-repair':(st==='VALID'?'doc-item-valid':'doc-item-wait')}">
+      <div class="doc-main-info">
+        <b>${esc(normalizeJenisDokumenLabel(d.jenis_dokumen) || '-')}</b>
+        <small class="muted">${esc(d.nama_file || '-')}</small>
+      </div>
+      <div class="doc-link">${d.url_file?`<a href="${esc(d.url_file)}" target="_blank">Buka File</a>`:esc(d.nama_file || '-')}</div>
+      <div class="doc-status">${badge(d.status_verifikasi || 'MENUNGGU')}</div>
+      <div class="doc-file-note-action compact-status-action v59-status-action">
+        <button class="btn-mini btn-detail" onclick="openDocStatusModal('${esc(d.id_dokumen)}')">Lihat Status</button>
+        ${actionHtml}
+      </div>
+    </div>`;
+  }).join("");
+
+  return `<tr><td class="doc-group-card ${colorClass}">
+    <div class="doc-group-head doc-group-head-v12">
+      <div class="doc-group-title"><b>${esc(kegiatanName(g.id_kegiatan))}</b><small>${esc(g.id_kegiatan)}</small></div>
+      <div><small class="muted">Bidang</small><br><b>${esc(bidangName(g.id_bidang))}</b></div>
+      <div><small class="muted">Status Dokumen</small><br>${badge(stGroup)}</div>
+      <div><small class="muted">Status Pencairan</small><br>${badge(stCair)}</div>
+      <div class="doc-toggle-wrap"><button class="btn-mini btn-detail" onclick="toggleDocGroup('${esc(g.id_kegiatan)}')">${isCollapsed ? 'Lihat Rincian' : 'Minimize'}</button></div>
+    </div>
+    <div class="doc-list ${isCollapsed ? 'hidden' : ''}">${docsHtml}</div>
+    <div class="doc-group-head doc-group-foot-v12 v69-final-action" style="border-top:1px solid #e8f1f7;border-bottom:0">
+      <div class="group-reason"><b>Rekap:</b> ${(g.docs||[]).length} file dokumen. ${colorClass === "doc-group-green" ? "Seluruh dokumen pada kegiatan ini sudah valid." : "Validasi/perbaikan aktif hanya untuk dokumen berstatus MENUNGGU."}</div>
+      <div></div><div></div><div></div><span class="muted">-</span>
+    </div>
+  </td></tr>`;
+}
+
+
+/* =========================
+   SIMPROV v63 final override
+   Perencanaan tidak bisa ajukan perubahan jika kegiatan sudah punya dokumen pencairan.
+   Alurnya: setelah masuk pencairan/upload dokumen, perubahan perencanaan dikunci agar histori pencairan tidak bentrok.
+   ========================= */
+function hasDokumenPencairanV63(idKegiatan){
+  return (dashboard?.dokumen || []).some(d => String(d.id_kegiatan) === String(idKegiatan));
+}
+function renderPerencanaanRow(k){
+  try{
+    k = k || {};
+    const st = String(k.status_perencanaan||"DIAJUKAN").toUpperCase();
+    const stTampil = typeof rencanaStatusTampilV57 === "function" ? rencanaStatusTampilV57(k) : st;
+    const prosesPerbaikan = typeof isRencanaProsesPerbaikanV57 === "function" ? isRencanaProsesPerbaikanV57(k) : false;
+    const locked = isKegiatanLocked(k);
+    const aksesBuka = aksesPerencanaanTerbuka();
+    const sudahAdaDokumen = hasDokumenPencairanV63(k.id_kegiatan);
+    const jumlah = toNumber(k.jumlah || (toNumber(k.volume)*toNumber(k.harga_satuan)));
+    const metode = k.metode_pemilihan || metodePemilihanByNilai(jumlah);
+    const waktu = k.waktu_pemilihan ? formatTanggalID(k.waktu_pemilihan) : "-";
+    const hasNote = !!(k.alasan_penolakan || k.alasan_perubahan || k.riwayat_perubahan || toNumber(k.perubahan_ke));
+    const note = `<button class="btn-mini btn-detail" onclick="openRencanaStatusModal('${esc(k.id_kegiatan)}')">${hasNote ? "Lihat Riwayat" : "Lihat"}</button>`;
+
+    let aksi = "";
+    if(canVerifyPBJ()){
+      if(st === "DIAJUKAN" || st === "PERUBAHAN_DIAJUKAN") {
+        aksi = `<button class="btn-mini btn-green" onclick="setujui('${esc(k.id_kegiatan)}')">Setujui</button><button class="btn-mini btn-orange" onclick="tolak('${esc(k.id_kegiatan)}')">Minta Perbaikan</button>`;
+      } else {
+        aksi = `<span class="muted">-</span>`;
+      }
+    } else if(isReviewer()){
+      aksi = `<span class="audit-pill">Read-only</span>`;
+    } else if(locked){
+      aksi = `<span class="status-done-pill">Selesai</span>`;
+    } else if(!aksesBuka){
+      aksi = `<span class="lock-badge">Akses perencanaan ditutup</span>`;
+    } else {
+      if(st === "DITOLAK"){
+        aksi = `<button class="btn-mini btn-orange" onclick="openEditModal('${esc(k.id_kegiatan)}','repair')">Ajukan Perbaikan</button>`;
+      } else if(st === "DIAJUKAN" && prosesPerbaikan){
+        aksi = `<button class="btn-mini" onclick="openEditModal('${esc(k.id_kegiatan)}','repair')">Edit Perbaikan</button>`;
+      } else if(st === "DIAJUKAN"){
+        aksi = `<button class="btn-mini" onclick="openEditModal('${esc(k.id_kegiatan)}','normal')">Edit</button><button class="btn-mini btn-red" onclick="hapusPerencanaan('${esc(k.id_kegiatan)}')">Hapus</button>`;
+      } else if(st === "DISETUJUI"){
+        if(sudahAdaDokumen){
+          aksi = `<span class="change-locked-pill">Sudah masuk pencairan</span>`;
+        }else{
+          aksi = `<button class="btn-mini btn-orange" onclick="openEditModal('${esc(k.id_kegiatan)}','change')">Ajukan Perubahan</button>`;
+        }
+      } else {
+        aksi = `<span class="muted">Menunggu Verifikator</span>`;
+      }
+    }
+
+    const perubahan = toNumber(k.perubahan_ke) ? `<br><small class="muted">Perubahan Ke-${toNumber(k.perubahan_ke)}</small>` : "";
+    const rowClass = locked ? "row-status-green" : (typeof getRencanaRowClassV60 === "function" ? getRencanaRowClassV60(k) : "row-proses");
+
+    return `<tr class="rencana-row ${rowClass}">
+      <td>${esc(k.id_kegiatan)}</td>
+      <td>${esc(bidangName(k.id_bidang))}</td>
+      <td><b>${esc(k.nama_kegiatan)}</b>${perubahan}</td>
+      <td>${esc(k.volume)}</td>
+      <td>${esc(k.satuan)}</td>
+      <td>${rupiah(k.harga_satuan)}</td>
+      <td><b>${rupiah(jumlah)}</b></td>
+      <td>${esc(metode)}</td>
+      <td>${esc(waktu)}</td>
+      <td>${badge(stTampil)}</td>
+      <td class="note-cell note-cell-popup">${note}</td>
+      <td class="nowrap aksi-perencanaan-v63">${aksi}</td>
+    </tr>`;
+  }catch(e){
+    console.error("ROW_PERENCANAAN_ERROR", e, k);
+    return `<tr class="rencana-row row-status-red"><td colspan="12">Data kegiatan ${esc(k?.id_kegiatan || "-")} perlu dicek. Detail: ${esc(e.message || e)}</td></tr>`;
+  }
+}
+function openEditModal(id, mode){
+  const k = dashboard.perencanaan.find(x => String(x.id_kegiatan)===String(id)); if(!k) return;
+  if(mode === "change" && hasDokumenPencairanV63(id)){
+    alert("Perubahan perencanaan tidak dapat diajukan karena kegiatan sudah memiliki dokumen pencairan.");
+    return;
+  }
+  if(isKegiatanLocked(k)){ alert("Kegiatan sudah selesai sampai validasi pencairan, perencanaan terkunci."); return; }
+  if(!aksesPerencanaanTerbuka()){ alert("Akses perencanaan bidang sedang ditutup Verifikator. Menu pencairan tetap bisa digunakan."); return; }
+
+  const realMode = mode === "repair" ? "normal" : mode;
+  document.getElementById("editMode").value = realMode;
+  document.getElementById("editIdKegiatan").value = k.id_kegiatan;
+  document.getElementById("editNamaKegiatan").value = k.nama_kegiatan || "";
+  document.getElementById("editKeterangan").value = k.keterangan || "";
+  document.getElementById("editVolume").value = angkaID(k.volume);
+  document.getElementById("editSatuan").value = k.satuan || "";
+  document.getElementById("editHarga").value = angkaID(k.harga_satuan);
+
+  const waktu = typeof normalizeDateForInputV61 === "function" ? normalizeDateForInputV61(k.waktu_pemilihan) : (k.waktu_pemilihan || "");
+  if(document.getElementById("editWaktuPemilihan")) document.getElementById("editWaktuPemilihan").value = waktu;
+
+  document.getElementById("editAlasanPerubahan").value = "";
+  if(mode === "repair"){
+    document.getElementById("editModalTitle").innerText = "Ajukan Perbaikan Perencanaan";
+    document.getElementById("editModalSub").innerText = "Perbaiki data sesuai catatan Verifikator. Waktu pemilihan wajib diisi.";
+  } else {
+    document.getElementById("editModalTitle").innerText = mode === "change" ? `Ajukan Perubahan Perencanaan` : "Edit Perencanaan";
+    document.getElementById("editModalSub").innerText = mode === "change" ? `Perubahan akan masuk sebagai Perubahan Ke-${toNumber(k.perubahan_ke)+1} dan menunggu Verifikator.` : "Data akan diajukan kembali ke Verifikator.";
+  }
+  document.getElementById("alasanPerubahanWrap").classList.toggle("hidden", mode !== "change");
+  setAutoTotal("editVolume","editHarga","editTotalPreview");
+  if(typeof ensureWaktuRequiredV61 === "function") ensureWaktuRequiredV61();
+  document.getElementById("editModal").classList.remove("hidden");
+}
+
+/* =========================
+   SIMPROV v64 patch - Verifikator + Finalisasi Kegiatan
+   Patch tambahan saja: tidak mengubah desain/menu existing, hanya pembatasan role dan status alur pencairan.
+   ========================= */
+function isKeuangan(){
+  const r = roleCode();
+  const role = String(currentUser?.role || '').toUpperCase();
+  return r === 'KEUANGAN' || r === 'VERIF_KEUANGAN' || r === 'VERIFIKATOR_KEUANGAN' || role === 'KEUANGAN' || role === 'VERIFIKATOR';
+}
+function isReviewer(){ return REVIEWER_ROLES.includes(roleCode()) || isKeuangan(); }
+function canSeeAll(){ return isAdmin() || isReviewer() || isKeuangan(); }
+function canVerifyKeuangan(){ return isKeuangan(); }
+function canFinalizePBJ(){ return isAdmin(); }
+function roleLabel(){
+  if(isAdmin()) return 'VERIFIKATOR';
+  if(isKeuangan()) return 'VERIFIKATOR';
+  if(isReviewer()) return roleCode();
+  return 'BIDANG';
+}
+function renderMenu(){
+  const menus = isKeuangan() ? ['Dashboard Monitoring','Pencairan'] : (isAdmin() ? MENUS_ADMIN : (isReviewer() ? MENUS_REVIEWER : MENUS_USER));
+  if(!menus.includes(activeMenu)) activeMenu = menus[0];
+  document.getElementById('menuNav').innerHTML = menus.map(m => `<button class="${activeMenu===m?'active':''}" onclick="setMenu('${m}')">${m}</button>`).join('');
+}
+function statusTextNormV64(v){ return String(v || '').toUpperCase().trim(); }
+function isDocValidV64(d){ const s = statusTextNormV64(d?.status_verifikasi || d); return s === 'VALID' || s === 'VALID DOKUMEN'; }
+function isDocRepairV64(d){ const s = statusTextNormV64(d?.status_verifikasi || d); return s === 'PERBAIKAN' || s === 'PERBAIKAN DOKUMEN' || s === 'DITOLAK'; }
+function isDocWaitV64(d){
+  const s = statusTextNormV64(d?.status_verifikasi || d);
+  return !s || ['MENUNGGU','MENUNGGU VERIFIKASI','MENUNGGU VERIFIKASI DOKUMEN','MENUNGGU VERIFIKASI PERBAIKAN','MENUNGGU VERIFIKASI PERBAIKAN DOKUMEN'].includes(s);
+}
+function statusColorClassV60(v){
+  const s = String(v || '').toUpperCase().trim();
+  if(['DISETUJUI','VALID','VALID DOKUMEN','SELESAI','DOKUMEN LENGKAP','SUDAH DIVERIFIKASI','SUDAH DIVALIDASI'].includes(s)) return 'status-green';
+  if(['DITOLAK','PERLU PERBAIKAN','PERBAIKAN','PERBAIKAN DOKUMEN','PERBAIKAN DOKUMEN','MELEBIHI PAGU'].includes(s)) return 'status-red';
+  if(['MENUNGGU VERIFIKASI PERBAIKAN','MENUNGGU VERIFIKASI PERBAIKAN DOKUMEN','MENUNGGU UPLOAD PERBAIKAN DARI BIDANG','PERUBAHAN_DIAJUKAN','PERUBAHAN DIAJUKAN'].includes(s)) return 'status-yellow';
+  if(['DIAJUKAN','MENUNGGU','MENUNGGU VERIFIKASI','MENUNGGU VERIFIKASI DOKUMEN','MENUNGGU VERIFIKASI PERENCANAAN','MENUNGGU DOKUMEN PENCAIRAN','MENUNGGU FINALISASI','BELUM ADA DOKUMEN'].includes(s)) return 'status-blue';
+  if(['BELUM INPUT','BELUM ADA DATA'].includes(s)) return 'status-gray';
+  if(['BUKA','AKTIF'].includes(s)) return 'status-green-soft';
+  if(['TUTUP','NONAKTIF'].includes(s)) return 'status-red-soft';
+  return 'status-gray';
+}
+function displayStatusTextV60(v){
+  const s = String(v || '-').toUpperCase().trim();
+  const map = {
+    'DIAJUKAN':'DIAJUKAN',
+    'DISETUJUI':'DISETUJUI PBJ',
+    'DITOLAK':'PERLU PERBAIKAN',
+    'PERBAIKAN':'PERLU PERBAIKAN',
+    'PERBAIKAN DOKUMEN':'PERBAIKAN DOKUMEN',
+    'VALID':'VALID DOKUMEN',
+    'VALID DOKUMEN':'VALID DOKUMEN',
+    'MENUNGGU':'MENUNGGU VERIFIKASI DOKUMEN',
+    'MENUNGGU VERIFIKASI':'MENUNGGU VERIFIKASI DOKUMEN',
+    'PERUBAHAN_DIAJUKAN':'MENUNGGU VERIFIKASI PERUBAHAN',
+    'BELUM_INPUT':'BELUM INPUT'
+  };
+  return map[s] || s.replace(/_/g,' ');
+}
+function badge(v){
+  const text = displayStatusTextV60(v);
+  const cls = statusColorClassV60(text);
+  return `<span class="status-badge-v60 ${cls}">${esc(text)}</span>`;
+}
+function renderSummary(){
+  const wrap = document.getElementById('summaryCards'); if(!dashboard){ wrap.innerHTML=''; return; }
+  if(canSeeAll()){
+    const pagu = dashboard.rekap.reduce((s,r)=>s+toNumber(r.pagu),0);
+    const total = dashboard.rekap.reduce((s,r)=>s+toNumber(r.total_perencanaan),0);
+    const dok = dashboard.dokumen.length;
+    const valid = dashboard.dokumen.filter(isDocValidV64).length;
+    wrap.innerHTML = card('Total Pagu', rupiah(pagu))+card('Total Perencanaan', rupiah(total))+card('Sisa Pagu', rupiah(pagu-total))+card('Dokumen Valid Dokumen', `${valid}/${dok}`);
+  } else {
+    const r = dashboard.rekap.find(x => String(x.id_bidang)===String(currentUser.id_bidang)) || {};
+    wrap.innerHTML = card('Pagu Bidang', rupiah(r.pagu))+card('Total Perencanaan', rupiah(r.total_perencanaan))+card('Sisa Pagu', rupiah(r.sisa_pagu))+card('Status Akses', r.status_akses || '-');
+  }
+}
+function isPencairanComplete(idKegiatan){
+  const st = String(getPencairanStatus(idKegiatan) || '').toUpperCase();
+  return st === 'SELESAI';
+}
+function isKegiatanLocked(k){ return isPencairanComplete(k.id_kegiatan); }
+function kegiatanButuhUploadAwal(k){
+  if(!k) return false;
+  if(String(k.status_perencanaan || '').toUpperCase() !== 'DISETUJUI') return false;
+  if(isPencairanComplete(k.id_kegiatan)) return false;
+  return remainingDocTypesForKegiatan(k.id_kegiatan).length > 0;
+}
+function groupDocStatus(g){
+  const docs = g.docs || [];
+  if(!docs.length) return 'BELUM ADA DOKUMEN';
+  if(docs.some(isDocRepairV64)) return 'PERBAIKAN DOKUMEN';
+  if(docs.every(isDocValidV64)) return 'VALID DOKUMEN';
+  if(docs.some(d => statusTextNormV64(d.status_verifikasi).includes('PERBAIKAN'))) return 'MENUNGGU VERIFIKASI PERBAIKAN DOKUMEN';
+  return 'MENUNGGU VERIFIKASI DOKUMEN';
+}
+function docGroupColorClassV62(g){
+  const docs = g?.docs || [];
+  if(!docs.length) return 'doc-group-gray';
+  if(docs.every(isDocValidV64)) return 'doc-group-green';
+  if(docs.some(isDocRepairV64)) return 'doc-group-red';
+  return 'doc-group-blue';
+}
+function getDocPosisiSaatIni(d){
+  const st = String(d?.status_verifikasi || 'MENUNGGU').toUpperCase();
+  if(isDocValidV64(d)) return 'Sudah divalidasi Verifikator';
+  if(isDocRepairV64(d)) return 'Menunggu upload perbaikan dari bidang';
+  if(st.includes('PERBAIKAN')) return 'Menunggu verifikasi perbaikan Keuangan';
+  return 'Menunggu verifikasi Keuangan';
+}
+function canVerifyDocumentNowV64(d){ return isDocWaitV64(d); }
+function allDocsValidKeuanganV64(idKegiatan){
+  const docs = (dashboard?.dokumen || []).filter(d => String(d.id_kegiatan) === String(idKegiatan));
+  return docs.length > 0 && docs.every(isDocValidV64);
+}
+async function selesaikanKegiatanPBJ(idKegiatan){
+  if(!canFinalizePBJ()) return;
+  if(!allDocsValidKeuanganV64(idKegiatan)){ alert('Semua dokumen harus VALID oleh Keuangan terlebih dahulu.'); return; }
+  if(!confirm('Verifikasi PBJ dan selesaikan kegiatan ini? Status akhir akan menjadi SELESAI.')) return;
+  showLoading('Menyelesaikan kegiatan...');
+  try{
+    const r = await apiPost({action:'updateStatusPencairan', user:currentUser, id_kegiatan:idKegiatan, status_pencairan:'SELESAI', catatan_admin:'Diselesaikan oleh Verifikator'});
+    alert(r.message); if(r.success) await loadDashboard(false);
+  }catch(e){ alert(e.message || 'Gagal menyelesaikan kegiatan.'); }
+  finally{ hideLoading(); }
+}
+function renderDokumenGroupRow(g){
+  const stGroup = groupDocStatus(g);
+  // Jangan memakai status tersimpan yang bisa masih stale. Status tampilan dihitung
+  // langsung dari kondisi dokumen terbaru: Keuangan -> PBJ -> Selesai.
+  const stCair = effectivePencairanStatusV68(g);
+  const stCairU = String(stCair || '').toUpperCase();
+  const isCollapsed = docGroupCollapse[g.id_kegiatan] === undefined ? false : !!docGroupCollapse[g.id_kegiatan];
+  const colorClass = docGroupColorClassV62(g);
+  const docsHtml = (g.docs || []).map(d => {
+    const st = String(d.status_verifikasi || 'MENUNGGU VERIFIKASI DOKUMEN').toUpperCase();
+    let actionHtml = `<span class="muted">-</span>`;
+    if(canVerifyKeuangan()){
+      if(canVerifyDocumentNowV64(d)){
+        actionHtml = `<div class="doc-file-actions v59-file-actions">
+          <button class="btn-mini btn-green" onclick="verifDok('${esc(d.id_dokumen)}','VALID')">Valid</button>
+          <button class="btn-mini btn-orange" onclick="mintaPerbaikanDok('${esc(d.id_dokumen)}')">Perbaikan</button>
+        </div>`;
+      }else{
+        actionHtml = `<div class="doc-file-actions v59-file-actions"><button class="btn-mini btn-disabled" disabled>Valid</button><button class="btn-mini btn-disabled" disabled>Perbaikan</button></div>`;
+      }
+    } else if(isAdmin() || isReviewer()){
+      actionHtml = `<span class="audit-pill">Read-only</span>`;
+    } else if(isDocRepairV64(d)){
+      actionHtml = `<div class="doc-action-box per-file-revision compact-revision">
+        <div class="revision-title">Upload Ulang</div>
+        <input type="file" id="revisi_${esc(d.id_dokumen)}">
+        <button class="btn-mini btn-upload-ulang" onclick="revisiDokumen('${esc(d.id_dokumen)}')">Kirim File</button>
+      </div>`;
+    }
+    return `<div class="doc-item doc-item-v47 ${isDocRepairV64(d)?'doc-item-repair':(isDocValidV64(d)?'doc-item-valid':'doc-item-wait')}">
+      <div class="doc-main-info"><b>${esc(normalizeJenisDokumenLabel(d.jenis_dokumen) || '-')}</b><small class="muted">${esc(d.nama_file || '-')}</small></div>
+      <div class="doc-link">${d.url_file?`<a href="${esc(d.url_file)}" target="_blank">Buka File</a>`:esc(d.nama_file || '-')}</div>
+      <div class="doc-status">${badge(d.status_verifikasi || 'MENUNGGU VERIFIKASI DOKUMEN')}</div>
+      <div class="doc-file-note-action compact-status-action v59-status-action"><button class="btn-mini btn-detail" onclick="openDocStatusModal('${esc(d.id_dokumen)}')">Lihat Status</button>${actionHtml}</div>
+    </div>`;
+  }).join('');
+  let finalAction = `<span class="muted">-</span>`;
+  if(canFinalizePBJ()){
+    if(stCairU === 'SELESAI'){
+      finalAction = `<span class="status-done-pill">SELESAI</span>`;
+    }else if(allDocsValidKeuanganV64(g.id_kegiatan)){
+      finalAction = `<button class="btn-mini btn-green btn-wide" onclick="selesaikanKegiatanPBJ('${esc(g.id_kegiatan)}')">Selesaikan Kegiatan</button>`;
+    }else{
+      finalAction = `<button class="btn-mini btn-disabled btn-wide" disabled title="Semua dokumen harus VALID DOKUMEN terlebih dahulu">Menunggu Valid Dokumen</button>`;
+    }
+  }
+  const rekapText = stCairU === 'SELESAI' ? 'Kegiatan sudah selesai.' : (colorClass === 'doc-group-green' ? 'Seluruh dokumen sudah valid Keuangan. Menunggu verifikasi/finalisasi PBJ.' : 'Validasi/perbaikan dokumen dilakukan oleh Verifikator.');
+  return `<tr><td class="doc-group-card ${colorClass}">
+    <div class="doc-group-head doc-group-head-v12">
+      <div class="doc-group-title"><b>${esc(kegiatanName(g.id_kegiatan))}</b><small>${esc(g.id_kegiatan)}</small></div>
+      <div><small class="muted">Bidang</small><br><b>${esc(bidangName(g.id_bidang))}</b></div>
+      <div><small class="muted">Status Dokumen</small><br>${badge(stGroup)}</div>
+      <div><small class="muted">Status Pencairan</small><br>${badge(stCair)}</div>
+      <div class="doc-toggle-wrap"><button class="btn-mini btn-detail" onclick="toggleDocGroup('${esc(g.id_kegiatan)}')">${isCollapsed ? 'Lihat Rincian' : 'Minimize'}</button></div>
+    </div>
+    <div class="doc-list ${isCollapsed ? 'hidden' : ''}">${docsHtml}</div>
+    <div class="doc-group-head doc-group-foot-v12 v69-final-action" style="border-top:1px solid #e8f1f7;border-bottom:0">
+      <div class="group-reason"><b>Rekap:</b> ${(g.docs||[]).length} file dokumen. ${rekapText}</div>
+      <div></div><div></div><div></div>${finalAction}
+    </div>
+  </td></tr>`;
+}
+async function verifDok(id, status){
+  if(!canVerifyKeuangan()){ alert('Validasi dokumen hanya dapat dilakukan oleh Verifikator.'); return; }
+  const d = (dashboard?.dokumen || []).find(x => String(x.id_dokumen) === String(id));
+  if(d && !canVerifyDocumentNowV64(d)){
+    alert(isDocValidV64(d) ? 'Dokumen sudah valid Keuangan.' : 'Dokumen masih menunggu upload perbaikan dari bidang.');
+    return;
+  }
+  showLoading('Verifikasi dokumen oleh Keuangan...');
+  try{
+    const r=await apiPost({action:'verifyDokumen', user:currentUser, id_dokumen:id, status_verifikasi:status, catatan_admin:'', catatan_keuangan:''});
+    alert(r.message); if(r.success) await loadDashboard(false);
+  }catch(e){alert(e.message)}finally{hideLoading();}
+}
+async function mintaPerbaikanDok(id){
+  if(!canVerifyKeuangan()){ alert('Perbaikan dokumen hanya dapat diminta oleh Verifikator.'); return; }
+  const d = (dashboard?.dokumen || []).find(x => String(x.id_dokumen) === String(id));
+  if(d && !canVerifyDocumentNowV64(d)){
+    alert(isDocValidV64(d) ? 'Dokumen sudah valid Keuangan.' : 'Dokumen masih menunggu upload perbaikan dari bidang.');
+    return;
+  }
+  const catatan = prompt('Catatan perbaikan dokumen wajib diisi:');
+  if(!catatan || !String(catatan).trim()){ alert('Catatan perbaikan wajib diisi.'); return; }
+  showLoading('Mengirim status perbaikan Keuangan...');
+  try{
+    const r=await apiPost({action:'verifyDokumen', user:currentUser, id_dokumen:id, status_verifikasi:'PERBAIKAN', catatan_admin:String(catatan).trim(), catatan_keuangan:String(catatan).trim()});
+    alert(r.message); if(r.success) await loadDashboard(false);
+  }catch(e){alert(e.message)}finally{hideLoading();}
+}
+function filterBarPencairan(){
+  const statusOpts = ['MENUNGGU VERIFIKASI DOKUMEN','VALID DOKUMEN','PERBAIKAN DOKUMEN','MENUNGGU VERIFIKASI PERBAIKAN DOKUMEN'].map(s=>`<option value="${s}" ${filters.cairStatus===s?'selected':''}>${s}</option>`).join('');
+  return `<div class="filter-card"><div class="toolbar">${canSeeAll()?`<div class="field small"><label>Filter Bidang</label><select onchange="filters.cairBidang=this.value;pencairanPage=1;renderPencairan()">${bidangOptions(filters.cairBidang,true)}</select></div>`:''}<div class="field small"><label>Filter Status Dokumen</label><select onchange="filters.cairStatus=this.value;pencairanPage=1;renderPencairan()"><option value="ALL">Semua Status</option>${statusOpts}</select></div><div class="field"><label>Search Nama Kegiatan</label><input value="${esc(filters.cairSearch)}" placeholder="Cari nama kegiatan..." oninput="filters.cairSearch=this.value;pencairanPage=1;renderPencairan()"></div><button class="btn-refresh" onclick="refreshData()">Refresh</button></div></div>`;
+}
+const __oldLoginV64 = login;
+login = async function(){
+  await __oldLoginV64();
+  if(currentUser && isKeuangan() && activeMenu !== 'Pencairan') { activeMenu = 'Pencairan'; renderAll(); }
+};
+window.onload = async function(){
+  const saved = localStorage.getItem('siporbo_user');
+  if(saved){
+    currentUser=JSON.parse(saved);
+    activeMenu=isKeuangan()?'Pencairan':(isAdmin()?'Dashboard Monitoring':'Struktur Anggaran');
+    document.getElementById('loginPage').classList.add('hidden');
+    document.getElementById('appPage').classList.remove('hidden');
+    await loadDashboard(true);
+  }
+};
+
+
+/* =========================
+   SIMPROV v65 - Akun Verifikator & pembagian bidang
+   ========================= */
+function explicitRoleV65(){
+  return String(currentUser?.role || currentUser?.id_bidang || '').toUpperCase().replace(/\s+/g,'_');
+}
+function isPBJVerifierV65(){ return ['ADMIN','VERIFIKATOR_PBJ','PBJ'].includes(explicitRoleV65()); }
+function isSuperAdminV65(){ return explicitRoleV65()==='ADMIN'; }
+function isKeuangan(){ return ['KEUANGAN','VERIFIKATOR_KEUANGAN','VERIF_KEUANGAN'].includes(explicitRoleV65()); }
+function isAdmin(){ return isSuperAdminV65(); }
+function canVerifyPBJ(){ return isPBJVerifierV65(); }
+function isReviewer(){ return REVIEWER_ROLES.includes(roleCode()) || isKeuangan() || (isPBJVerifierV65() && !isSuperAdminV65()); }
+function canSeeAll(){ return isSuperAdminV65() || isReviewer() || isKeuangan(); }
+function canFinalizePBJ(){ return isPBJVerifierV65(); }
+function roleLabel(){
+  if(isSuperAdminV65()) return 'ADMIN / VERIFIKATOR';
+  if(isPBJVerifierV65()) return 'VERIFIKATOR';
+  if(isKeuangan()) return 'VERIFIKATOR';
+  if(REVIEWER_ROLES.includes(roleCode())) return roleCode();
+  return 'BIDANG';
+}
+function renderMenu(){
+  let menus;
+  if(isSuperAdminV65()) menus=['Dashboard Monitoring','Struktur Anggaran','Perencanaan','Pencairan','Manajemen Akun'];
+  else if(isPBJVerifierV65()) menus=['Dashboard Monitoring','Struktur Anggaran','Perencanaan','Pencairan'];
+  else if(isKeuangan()) menus=['Dashboard Monitoring','Pencairan'];
+  else menus=isReviewer()?MENUS_REVIEWER:MENUS_USER;
+  if(!menus.includes(activeMenu)) activeMenu=menus[0];
+  document.getElementById('menuNav').innerHTML=menus.map(m=>`<button class="${activeMenu===m?'active':''}" onclick="setMenu('${m}')">${m}</button>`).join('');
+}
+const renderContentBeforeV65 = renderContent;
+renderContent = function(){
+  if(activeMenu==='Manajemen Akun') return renderManajemenAkunV65();
+  return renderContentBeforeV65();
+};
+function verifierUsersV65(){ return dashboard?.verifierUsers || []; }
+function bidangChecksV65(selected=[]){
+  const set=new Set((selected||[]).map(String));
+  return (dashboard?.bidangs||[]).map(b=>`<label class="account-scope-item"><input type="checkbox" name="akunBidang" value="${esc(b.id_bidang)}" ${set.has(String(b.id_bidang))?'checked':''}><span><b>${esc(b.nama_bidang)}</b><small>${esc(b.id_bidang)}</small></span></label>`).join('');
+}
+function renderManajemenAkunV65(){
+  if(!isSuperAdminV65()){ document.getElementById('contentArea').innerHTML='<section class="panel"><h3>Akses ditolak</h3></section>'; return; }
+  const users=verifierUsersV65();
+  const rows=users.map(u=>{
+    const ids=String(u.bidang_akses||'').split(',').map(x=>x.trim()).filter(Boolean);
+    const names=ids.map(id=>bidangName(id)).join(', ') || '-';
+    return `<div class="admin-budget-card account-card-v65">
+      <div class="admin-budget-info"><b>${esc(u.nama||'-')}</b><small>${esc(u.id_user||'')} • ${esc(u.username||'')}</small></div>
+      <div><span class="badge badge-blue">${esc(String(u.role||'').replaceAll('_',' '))}</span></div>
+      <div class="account-scope-text"><small>Bidang Penugasan</small><br>${esc(names)}</div>
+      <div>${badge(u.status||'AKTIF')}</div>
+      <div><button class="btn-mini" onclick="openEditVerifierV65('${esc(u.id_user)}')">Edit</button></div>
+    </div>`;
+  }).join('');
+  document.getElementById('contentArea').innerHTML=`<section class="panel fade-up premium-panel">
+    <div class="panel-title-row"><div><h3>Manajemen Akun Verifikator</h3><p class="panel-sub">Admin membuat akun Verifikator/Keuangan dan menentukan bidang yang boleh ditangani.</p></div><button class="btn-refresh" onclick="openCreateVerifierV65()">+ Buat Akun</button></div>
+    <div class="admin-budget-list">${rows||'<p class="muted">Belum ada akun verifikator tambahan.</p>'}</div>
+  </section><div id="verifierModalV65" class="modal hidden"></div>`;
+}
+function verifierFormModalV65(u){
+  const editing=!!u;
+  const selected=String(u?.bidang_akses||'').split(',').map(x=>x.trim()).filter(Boolean);
+  const modal=document.getElementById('verifierModalV65');
+  modal.className='modal';
+  modal.innerHTML=`<div class="modal-card modal-wide"><div class="modal-head"><h3>${editing?'Edit':'Buat'} Akun Verifikator</h3><button onclick="closeVerifierModalV65()">×</button></div>
+    <div class="form-grid">
+      <div class="field"><label>Nama Petugas</label><input id="akunNama" value="${esc(u?.nama||'')}" placeholder="Contoh: Udin"></div>
+      <div class="field"><label>Role</label><select id="akunRole"><option value="VERIFIKATOR_PBJ" ${String(u?.role)==='VERIFIKATOR_PBJ'?'selected':''}>Verifikator</option><option value="VERIFIKATOR_KEUANGAN" ${String(u?.role)==='VERIFIKATOR_KEUANGAN'?'selected':''}>Verifikator</option></select></div>
+      <div class="field"><label>Username</label><input id="akunUsername" value="${esc(u?.username||'')}" placeholder="udin_pbj"></div>
+      <div class="field"><label>Password ${editing?'(kosongkan jika tidak diubah)':''}</label><input id="akunPassword" type="text" placeholder="Password akun"></div>
+      ${editing?`<div class="field"><label>Status</label><select id="akunStatus"><option value="AKTIF" ${String(u?.status).toUpperCase()==='AKTIF'?'selected':''}>AKTIF</option><option value="NONAKTIF" ${String(u?.status).toUpperCase()==='NONAKTIF'?'selected':''}>NONAKTIF</option></select></div>`:''}
+    </div>
+    <div class="field"><label>Pilih Bidang Penugasan</label><div class="account-scope-grid">${bidangChecksV65(selected)}</div></div>
+    <div class="modal-actions"><button class="btn-soft" onclick="closeVerifierModalV65()">Batal</button><button onclick="saveVerifierV65('${esc(u?.id_user||'')}')">Simpan</button></div>
+  </div>`;
+}
+function openCreateVerifierV65(){ verifierFormModalV65(null); }
+function openEditVerifierV65(id){ const u=verifierUsersV65().find(x=>String(x.id_user)===String(id)); if(u) verifierFormModalV65(u); }
+function closeVerifierModalV65(){ const m=document.getElementById('verifierModalV65'); if(m){m.className='modal hidden';m.innerHTML='';} }
+async function saveVerifierV65(id){
+  const bidang_akses=[...document.querySelectorAll('input[name="akunBidang"]:checked')].map(x=>x.value);
+  const data={id_user:id,nama:document.getElementById('akunNama').value.trim(),role:document.getElementById('akunRole').value,username:document.getElementById('akunUsername').value.trim(),password:document.getElementById('akunPassword').value,bidang_akses,status:document.getElementById('akunStatus')?.value||'AKTIF'};
+  if(!data.nama||!data.username||(!id&&!data.password)||!bidang_akses.length){ alert('Nama, username, password, dan minimal satu bidang wajib diisi.'); return; }
+  showLoading('Menyimpan akun...');
+  try{ const r=await apiPost({action:id?'updateVerifierAccount':'saveVerifierAccount',user:currentUser,data}); alert(r.message); if(r.success){closeVerifierModalV65();await loadDashboard(false);} }catch(e){alert(e.message)}finally{hideLoading();}
+}
+
+/* =========================
+   SIMPROV v66 - Revisi waktu edit & laporan berbasis role
+   1) Waktu Pemilihan pada modal edit selalu mengikuti data terakhir.
+   2) Laporan Verifikator hanya memuat bidang penugasannya.
+   3) Laporan Verifikator hanya memuat Rekap Dokumen Pencairan
+      per Kegiatan dari bidang penugasannya.
+   ========================= */
+function normalizeDateForInputV61(v){
+  if(v === null || v === undefined || v === '') return '';
+
+  // Google Apps Script dapat mengirim Date sebagai ISO timestamp.
+  // Gunakan tanggal lokal browser agar tanggal WIB tidak mundur satu hari.
+  if(v instanceof Date && !isNaN(v.getTime())){
+    return `${v.getFullYear()}-${String(v.getMonth()+1).padStart(2,'0')}-${String(v.getDate()).padStart(2,'0')}`;
+  }
+
+  const s = String(v).trim();
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+  if(/^\d{4}-\d{2}-\d{2}T/.test(s)){
+    const d = new Date(s);
+    if(!isNaN(d.getTime())){
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }
+    return s.slice(0,10);
+  }
+
+  const slash = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if(slash) return `${slash[3]}-${String(slash[2]).padStart(2,'0')}-${String(slash[1]).padStart(2,'0')}`;
+
+  const bulan = {
+    januari:'01', februari:'02', maret:'03', april:'04', mei:'05', juni:'06',
+    juli:'07', agustus:'08', september:'09', oktober:'10', november:'11', desember:'12'
+  };
+  const indo = s.toLowerCase().match(/^(\d{1,2})\s+([a-z]+)\s+(\d{4})$/);
+  if(indo && bulan[indo[2]]) return `${indo[3]}-${bulan[indo[2]]}-${String(indo[1]).padStart(2,'0')}`;
+
+  const d = new Date(s);
+  if(!isNaN(d.getTime())){
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+  return '';
+}
+
+function reportDocStatusV66(d){
+  return String(d?.status_verifikasi || 'MENUNGGU VERIFIKASI DOKUMEN').trim().toUpperCase();
+}
+function reportGroupDocStatusV66(docs){
+  if(!docs?.length) return 'BELUM ADA DOKUMEN';
+  const sts = docs.map(reportDocStatusV66);
+  if(sts.some(s => s.includes('PERBAIKAN'))) return 'PERLU PERBAIKAN DOKUMEN';
+  if(sts.every(s => s === 'VALID' || s === 'VALID DOKUMEN')) return 'VALID DOKUMEN';
+  if(sts.some(s => s.includes('VERIFIKASI PERBAIKAN'))) return 'MENUNGGU VERIFIKASI PERBAIKAN DOKUMEN';
+  return 'MENUNGGU VERIFIKASI DOKUMEN';
+}
+function reportCatatanDokumenV66(d){
+  return d?.catatan_keuangan || d?.catatan_admin || d?.catatan_Verifikator || d?.catatan || '-';
+}
+function reportTahapanDokumenV66(d){
+  const rows=[];
+  rows.push(`Upload awal: ${formatTanggalJam(d.tanggal_upload)} oleh ${d.upload_by || '-'}`);
+  if(d.tanggal_verifikasi || d.verifikasi_by || reportCatatanDokumenV66(d) !== '-'){
+    rows.push(`Pemeriksaan Verifikator: ${formatTanggalJam(d.tanggal_verifikasi)} oleh ${d.verifikasi_by || '-'} - ${displayStatusText(d.status_verifikasi || 'MENUNGGU VERIFIKASI DOKUMEN')}${reportCatatanDokumenV66(d) !== '-' ? ' ('+reportCatatanDokumenV66(d)+')' : ''}`);
+  }
+  if(d.tanggal_revisi || d.revisi_by) rows.push(`Upload ulang/perbaikan: ${formatTanggalJam(d.tanggal_revisi)} oleh ${d.revisi_by || '-'}`);
+  rows.push(`Posisi akhir: ${displayStatusText(d.status_verifikasi || 'MENUNGGU VERIFIKASI DOKUMEN')}`);
+  return rows.join('\n');
+}
+function reportDokumenGroupedRowsV66(dokumen){
+  const grouped={};
+  (dokumen || []).forEach(d => {
+    const id=String(d.id_kegiatan || '-');
+    if(!grouped[id]) grouped[id]=[];
+    grouped[id].push(d);
+  });
+  return Object.entries(grouped).map(([id,docs],i)=>{
+    const first=docs[0] || {};
+    const rincian=docs.map((d,idx)=>`<div class="doc-report-item">
+      <b>${idx+1}. ${plainText(normalizeJenisDokumenLabel(d.jenis_dokumen))}</b><br>
+      File: ${plainText(d.nama_file || '-')} ${d.url_file ? ` - ${htmlLink(d.url_file,'Buka File')}` : ''}<br>
+      Status: <b>${plainText(displayStatusText(d.status_verifikasi || 'MENUNGGU VERIFIKASI DOKUMEN'))}</b><br>
+      Catatan Verifikator: ${plainText(reportCatatanDokumenV66(d))}<br>
+      Tahapan: ${plainText(reportTahapanDokumenV66(d)).replace(/\n/g,'<br>')}
+    </div>`).join('');
+    return `<tr><td>${i+1}</td><td>${plainText(bidangName(first.id_bidang))}</td><td>${plainText(kegiatanName(id))}<br><span class="small">${plainText(id)}</span></td><td class="status">${plainText(reportGroupDocStatusV66(docs))}</td><td class="status">${plainText(displayStatusText(getPencairanStatus(id)))}</td><td>${docs.length} dokumen</td><td>${rincian}</td></tr>`;
+  }).join('');
+}
+function assignedReportIdsV66(){
+  return String(currentUser?.bidang_akses || '').split(/[,;|\n]+/).map(x=>x.trim()).filter(Boolean);
+}
+function filterAssignedV66(rows){
+  const ids=assignedReportIdsV66();
+  if(isSuperAdminV65() || REVIEWER_ROLES.includes(roleCode())) return rows || [];
+  if(isPBJVerifierV65() || isKeuangan()) return (rows || []).filter(x=>ids.includes(String(x.id_bidang)));
+  return (rows || []).filter(x=>String(x.id_bidang)===String(currentUser?.id_bidang || ''));
+}
+function downloadDashboardPDF(){
+  const rekap=filterAssignedV66(dashboard.rekap || []);
+  const perencanaan=filterAssignedV66(dashboard.perencanaan || []);
+  const dokumen=filterAssignedV66(dashboard.dokumen || []);
+
+  if(isKeuangan()){
+    const rows=reportDokumenGroupedRowsV66(dokumen);
+    const bidangNames=[...new Set(dokumen.map(d=>bidangName(d.id_bidang)))].filter(Boolean).join(', ') || '-';
+    const body=`<div class="note"><b>Verifikator:</b> ${plainText(currentUser?.nama || '-')}<br><b>Bidang Penugasan:</b> ${plainText(bidangNames)}</div>
+      <h3>Rekap Dokumen Pencairan per Kegiatan</h3>
+      <table><thead><tr><th>No</th><th>Bidang</th><th>Kegiatan</th><th>Status Dokumen Kegiatan</th><th>Status Pencairan Kegiatan</th><th>Jumlah Dokumen</th><th>Rincian Dokumen dan Tahapan Proses</th></tr></thead><tbody>${rows || '<tr><td colspan="7">Belum ada dokumen pencairan pada bidang penugasan</td></tr>'}</tbody></table>`;
+    openReportWindow('Laporan Verifikator - Bidang Penugasan',body);
+    return;
+  }
+
+  const pagu=rekap.reduce((s,r)=>s+toNumber(r.pagu),0);
+  const total=rekap.reduce((s,r)=>s+toNumber(r.total_perencanaan),0);
+  const sisa=pagu-total;
+  const rowsRekap=rekap.map((r,i)=>`<tr><td>${i+1}</td><td>${plainText(r.nama_bidang)}<br><span class="small">${plainText(r.id_bidang)}</span></td><td>${rupiah(r.pagu)}</td><td>${rupiah(r.total_perencanaan)}</td><td>${rupiah(r.sisa_pagu)}</td><td>${plainText(r.jumlah_kegiatan||0)}</td><td>${plainText(r.dokumen_upload||0)}</td><td>${plainText(r.dokumen_valid||0)}</td><td>${plainText(r.status_akses||'-')}</td><td class="status">${plainText(displayStatusText(r.status_progress||'-'))}</td></tr>`).join('');
+  const rowsPerencanaan=perencanaan.map((k,i)=>{
+    const jumlah=toNumber(k.jumlah || (toNumber(k.volume)*toNumber(k.harga_satuan)));
+    const posisi=typeof getRencanaPosisiSaatIni==='function' ? getRencanaPosisiSaatIni(k) : displayStatusText(k.status_perencanaan||'-');
+    const riwayat=reportRiwayatPerencanaan(k);
+    return `<tr><td>${i+1}</td><td>${plainText(k.id_kegiatan)}</td><td>${plainText(bidangName(k.id_bidang))}</td><td>${plainText(k.nama_kegiatan)}</td><td>${plainText(k.keterangan||'-')}</td><td>${plainText(k.volume||0)} ${plainText(k.satuan||'')}</td><td>${rupiah(k.harga_satuan)}</td><td>${rupiah(jumlah)}</td><td>${plainText(k.metode_pemilihan || metodePemilihanByNilai(jumlah))}</td><td>${plainText(k.waktu_pemilihan ? formatTanggalID(k.waktu_pemilihan) : '-')}</td><td class="status">${plainText(posisi)}</td><td>${plainText(formalReportText(riwayat)).replace(/\n/g,'<br>')}</td><td>${plainText(displayStatusText(getPencairanStatus(k.id_kegiatan)))}</td></tr>`;
+  }).join('');
+  const rowsDok=reportDokumenGroupedRowsV66(dokumen);
+  const title=isPBJVerifierV65() && !isSuperAdminV65() ? 'Laporan Verifikator - Bidang Penugasan' : (isSuperAdminV65() ? 'Laporan Monitoring Keseluruhan SIMPROV' : `Laporan Monitoring Bidang ${currentUser?.nama_bidang || currentUser?.nama || ''}`);
+  const body=`<div class="summary"><div class="card"><span>Total Pagu</span><b>${rupiah(pagu)}</b></div><div class="card"><span>Total Perencanaan</span><b>${rupiah(total)}</b></div><div class="card"><span>Sisa Pagu</span><b>${rupiah(sisa)}</b></div><div class="card"><span>Jumlah Kegiatan</span><b>${perencanaan.length}</b></div></div>
+    <h3>1. Rekapitulasi Anggaran per Bidang</h3><table><thead><tr><th>No</th><th>Bidang</th><th>Pagu</th><th>Perencanaan</th><th>Sisa</th><th>Kegiatan</th><th>Dok Upload</th><th>Dok Valid</th><th>Akses</th><th>Progress</th></tr></thead><tbody>${rowsRekap || '<tr><td colspan="10">Belum ada data</td></tr>'}</tbody></table>
+    <h3>2. Rekap Data Perencanaan dan Riwayat Pemeriksaan</h3><table><thead><tr><th>No</th><th>ID Kegiatan</th><th>Bidang</th><th>Nama Kegiatan</th><th>Keterangan</th><th>Volume</th><th>Harga Satuan</th><th>Jumlah</th><th>Metode</th><th>Waktu Pemilihan</th><th>Posisi Saat Ini</th><th>Riwayat Perencanaan</th><th>Status Pencairan</th></tr></thead><tbody>${rowsPerencanaan || '<tr><td colspan="13">Belum ada data perencanaan</td></tr>'}</tbody></table>
+    <h3>3. Rekap Dokumen Pencairan per Kegiatan</h3><table><thead><tr><th>No</th><th>Bidang</th><th>Kegiatan</th><th>Status Dokumen Kegiatan</th><th>Status Pencairan Kegiatan</th><th>Jumlah Dokumen</th><th>Rincian Dokumen dan Tahapan Proses</th></tr></thead><tbody>${rowsDok || '<tr><td colspan="7">Belum ada dokumen pencairan</td></tr>'}</tbody></table>`;
+  openReportWindow(title,body);
+}
+function cetakLaporan(){ downloadDashboardPDF(); }
+function generateReport(){ downloadDashboardPDF(); }
+function downloadLaporanPDF(){ downloadDashboardPDF(); }
+
+
+/* =========================
+   SIMPROV v67 - Superadmin dua tahap & status final PBJ
+   ========================= */
+function canVerifyKeuangan(){ return isKeuangan() || isSuperAdminV65(); }
+function canFinalizePBJ(){ return isPBJVerifierV65(); }
+
+/* =========================
+   SIMPROV v70 - finalisasi PBJ stabil + detail kegiatan pada pencairan
+   ========================= */
+function roleNormV70(){
+  return String(currentUser?.role || currentUser?.nama_role || currentUser?.id_bidang || '')
+    .trim().toUpperCase().replace(/[\s-]+/g,'_');
+}
+function isPBJFinalizerV70(){
+  return ['ADMIN','SUPERADMIN','SUPER_ADMIN','VERIFIKATOR_PBJ','VERIF_PBJ','PBJ'].includes(roleNormV70());
+}
+function canFinalizePBJ(){ return isPBJFinalizerV70(); }
+function canVerifyPBJ(){ return isPBJFinalizerV70(); }
+function rencanaByIdV70(id){
+  return (dashboard?.perencanaan || []).find(x => String(x.id_kegiatan) === String(id)) || {};
+}
+function docStatusNormV70(d){
+  return String(d?.status_verifikasi || '').trim().toUpperCase().replace(/_/g,' ');
+}
+function isDocValidKeuanganV70(d){
+  const s=docStatusNormV70(d);
+  return s === 'VALID' || s === 'VALID DOKUMEN' || s === 'VALID OLEH KEUANGAN';
+}
+function normalizeDocKeyV71(v){
+  return String(normalizeJenisDokumenLabel(v)||v||'').trim().toUpperCase().replace(/\s*\/\s*/g,' / ').replace(/\s+/g,' ');
+}
+function documentProgressV71(idKegiatan){
+  const meta=kegiatanMetaV70(idKegiatan);
+  const required=dokumenKetentuanByMetode(meta.metode);
+  const docs=(dashboard?.dokumen || []).filter(d=>String(d.id_kegiatan)===String(idKegiatan));
+  const byKey=new Map();
+  docs.forEach(d=>byKey.set(normalizeDocKeyV71(d.jenis_dokumen),d));
+  const requiredDocs=required.map(j=>({jenis:j,doc:byKey.get(normalizeDocKeyV71(j))||null}));
+  const uploaded=requiredDocs.filter(x=>x.doc).length;
+  const valid=requiredDocs.filter(x=>x.doc && isDocValidKeuanganV70(x.doc)).length;
+  const missing=requiredDocs.filter(x=>!x.doc).map(x=>x.jenis);
+  const invalid=requiredDocs.filter(x=>x.doc && !isDocValidKeuanganV70(x.doc)).map(x=>x.jenis);
+  return {required,requiredCount:required.length,docs,uploaded,valid,missing,invalid,completeUpload:uploaded===required.length,allValid:valid===required.length && required.length>0};
+}
+function allDocsValidKeuanganV64(idKegiatan){
+  return documentProgressV71(idKegiatan).allValid;
+}
+function effectivePencairanStatusV70(g){
+  const saved=String(getPencairanStatus(g.id_kegiatan)||'').toUpperCase();
+  if(saved==='SELESAI') return 'SELESAI';
+  const docs=g.docs||[];
+  const prog=documentProgressV71(g.id_kegiatan);
+  if(!docs.length) return 'MENUNGGU DOKUMEN PENCAIRAN';
+  if(!prog.completeUpload) return 'DOKUMEN BELUM LENGKAP';
+  if(prog.allValid) return 'MENUNGGU FINALISASI';
+  if(docs.some(isDocRepairV64)) return 'PERBAIKAN DOKUMEN';
+  if(docs.some(d=>docStatusNormV70(d).includes('PERBAIKAN'))) return 'MENUNGGU VERIFIKASI PERBAIKAN DOKUMEN';
+  return 'MENUNGGU VERIFIKASI DOKUMEN';
+}
+function formatInputDateTimeV70(v){
+  if(!v) return '-';
+  try { return fmtDateTimeID(v); } catch(e) { return formatTanggalJam(v); }
+}
+function kegiatanMetaV70(id){
+  const k=rencanaByIdV70(id);
+  const jumlah=toNumber(k.jumlah || (toNumber(k.volume)*toNumber(k.harga_satuan)));
+  return {
+    k,
+    jumlah,
+    metode:k.metode_pemilihan || metodePemilihanByNilai(jumlah),
+    waktu:k.waktu_pemilihan ? formatTanggalID(k.waktu_pemilihan) : '-',
+    tanggal:k.tanggal_input ? formatInputDateTimeV70(k.tanggal_input) : (k.created_at ? formatInputDateTimeV70(k.created_at) : '-')
+  };
+}
+async function selesaikanKegiatanPBJ(idKegiatan){
+  if(!isPBJFinalizerV70()){ alert('Akses finalisasi hanya untuk Admin/Superadmin atau Verifikator.'); return; }
+  if(!allDocsValidKeuanganV64(idKegiatan)){
+    alert('Belum dapat diselesaikan. Seluruh dokumen harus berstatus VALID DOKUMEN terlebih dahulu.'); return;
+  }
+  if(!confirm('Seluruh dokumen sudah VALID DOKUMEN. Verifikasi PBJ dan ubah status kegiatan menjadi SELESAI?')) return;
+  showLoading('Verifikasi PBJ dan menyelesaikan kegiatan...');
+  try{
+    const r=await apiPost({action:'updateStatusPencairan',user:currentUser,id_kegiatan:idKegiatan,status_pencairan:'SELESAI',catatan_admin:'Diverifikasi PBJ dan diselesaikan oleh '+(currentUser?.nama||currentUser?.username||'Verifikator')});
+    alert(r.message || (r.success?'Kegiatan berhasil diselesaikan.':'Gagal menyelesaikan kegiatan.'));
+    if(r.success) await loadDashboard(false);
+  }catch(e){ alert(e.message || 'Gagal menyelesaikan kegiatan.'); }
+  finally{ hideLoading(); }
+}
+function renderDokumenGroupRow(g){
+  const stGroup=groupDocStatus(g);
+  const stCair=effectivePencairanStatusV70(g);
+  const isCollapsed=docGroupCollapse[g.id_kegiatan]===undefined?false:!!docGroupCollapse[g.id_kegiatan];
+  const colorClass=docGroupColorClassV62(g);
+  const meta=kegiatanMetaV70(g.id_kegiatan);
+  const docsHtml=(g.docs||[]).map(d=>{
+    let actionHtml='<span class="muted">-</span>';
+    if(canVerifyKeuangan()){
+      if(canVerifyDocumentNowV64(d)) actionHtml=`<div class="doc-file-actions v59-file-actions"><button class="btn-mini btn-green" onclick="verifDok('${esc(d.id_dokumen)}','VALID')">Valid</button><button class="btn-mini btn-orange" onclick="mintaPerbaikanDok('${esc(d.id_dokumen)}')">Perbaikan</button></div>`;
+      else actionHtml='<div class="doc-file-actions v59-file-actions"><button class="btn-mini btn-disabled" disabled>Valid</button><button class="btn-mini btn-disabled" disabled>Perbaikan</button></div>';
+    }else if(isPBJFinalizerV70() || isReviewer()) actionHtml='<span class="audit-pill">Read-only</span>';
+    else if(isDocRepairV64(d)) actionHtml=`<div class="doc-action-box per-file-revision compact-revision"><div class="revision-title">Upload Ulang</div><input type="file" id="revisi_${esc(d.id_dokumen)}"><button class="btn-mini btn-upload-ulang" onclick="revisiDokumen('${esc(d.id_dokumen)}')">Kirim File</button></div>`;
+    return `<div class="doc-item doc-item-v47 ${isDocRepairV64(d)?'doc-item-repair':(isDocValidKeuanganV70(d)?'doc-item-valid':'doc-item-wait')}"><div class="doc-main-info"><b>${esc(normalizeJenisDokumenLabel(d.jenis_dokumen)||'-')}</b><small class="muted">${esc(d.nama_file||'-')}</small></div><div class="doc-link">${d.url_file?`<a href="${esc(d.url_file)}" target="_blank">Buka File</a>`:esc(d.nama_file||'-')}</div><div class="doc-status">${badge(d.status_verifikasi||'MENUNGGU VERIFIKASI DOKUMEN')}</div><div class="doc-file-note-action compact-status-action v59-status-action"><button class="btn-mini btn-detail" onclick="openDocStatusModal('${esc(d.id_dokumen)}')">Lihat Status</button>${actionHtml}</div></div>`;
+  }).join('');
+  const prog=documentProgressV71(g.id_kegiatan);
+  let finalAction='';
+  if(isPBJFinalizerV70()){
+    if(stCair==='SELESAI') finalAction='<span class="status-done-pill">SELESAI</span>';
+    else if(prog.allValid) finalAction=`<button class="btn-mini btn-green btn-wide v70-final-btn" onclick="selesaikanKegiatanPBJ('${esc(g.id_kegiatan)}')">Selesaikan Kegiatan</button>`;
+    else finalAction=`<button class="btn-mini btn-disabled btn-wide v70-final-btn" disabled>${prog.uploaded}/${prog.requiredCount} Dokumen • ${prog.valid} Valid</button>`;
+  }else finalAction='<span class="muted">Finalisasi dilakukan Verifikator</span>';
+  const progressHtml=`<div class="v72-doc-progress"><b>${prog.uploaded}/${prog.requiredCount} Dokumen Terunggah</b><span>${prog.valid}/${prog.requiredCount} Valid Dokumen</span>${prog.missing.length?`<small>Belum diupload: ${esc(prog.missing.join(', '))}</small>`:''}</div>`;
+  const finalNote=stCair==='MENUNGGU FINALISASI'?'Seluruh dokumen wajib sudah lengkap dan valid Keuangan. Siap diverifikasi PBJ.':(stCair==='SELESAI'?'Kegiatan telah selesai.':(!prog.completeUpload?`Dokumen wajib belum lengkap (${prog.uploaded}/${prog.requiredCount}).`:`Menunggu validasi Keuangan (${prog.valid}/${prog.requiredCount} valid).`));
+  return `<tr><td class="doc-group-card ${prog.allValid?colorClass:(prog.missing.length?'doc-group-blue':colorClass)}"><div class="doc-group-head doc-group-head-v12 v70-group-head"><div class="doc-group-title"><b>${esc(kegiatanName(g.id_kegiatan))}</b><small>${esc(g.id_kegiatan)}</small><div class="v70-kegiatan-meta"><span><b>Jumlah:</b> ${rupiah(meta.jumlah)}</span><span><b>Metode:</b> ${esc(meta.metode)}</span><span><b>Waktu Pemilihan:</b> ${esc(meta.waktu)}</span></div></div><div><small class="muted">Bidang</small><br><b>${esc(bidangName(g.id_bidang))}</b></div><div><small class="muted">Kelengkapan</small><br>${progressHtml}</div><div><small class="muted">Status Pencairan</small><br>${badge(stCair)}</div><div class="doc-toggle-wrap"><button class="btn-mini btn-detail" onclick="toggleDocGroup('${esc(g.id_kegiatan)}')">${isCollapsed?'Lihat Rincian':'Minimize'}</button></div></div><div class="doc-list ${isCollapsed?'hidden':''}">${docsHtml}</div><div class="v70-final-row"><div><b>Tahap Finalisasi</b><small>${finalNote}</small></div>${finalAction}</div></td></tr>`;
+}
+function openDocStatusModal(idDokumen){
+  const d=(dashboard?.dokumen||[]).find(x=>String(x.id_dokumen)===String(idDokumen));
+  if(!d){alert('Data dokumen tidak ditemukan.');return;}
+  const meta=kegiatanMetaV70(d.id_kegiatan), k=meta.k;
+  const cat=d.catatan_keuangan||d.catatan_admin||d.catatan_Verifikator||d.catatan||'-';
+  const html=`<div class="status-modal-backdrop" id="docStatusModal" onclick="if(event.target.id==='docStatusModal') closeDocStatusModal()"><div class="status-modal-card v70-status-card"><div class="status-modal-head"><h3>Status Dokumen</h3><button type="button" onclick="closeDocStatusModal()">Tutup</button></div><div class="status-modal-body"><div class="status-doc-title"><b>${esc(normalizeJenisDokumenLabel(d.jenis_dokumen)||'-')}</b><span>${esc(kegiatanName(d.id_kegiatan))}</span></div><div class="v70-plan-box"><h4>Data Perencanaan</h4><p><b>Nama kegiatan:</b> ${esc(k.nama_kegiatan||kegiatanName(d.id_kegiatan)||'-')}</p><p><b>Bidang:</b> ${esc(bidangName(d.id_bidang))}</p><p><b>Jumlah:</b> ${rupiah(meta.jumlah)}</p><p><b>Metode:</b> ${esc(meta.metode)}</p><p><b>Waktu Pemilihan:</b> ${esc(meta.waktu)}</p><p><b>Tanggal Input:</b> ${esc(meta.tanggal)}</p></div><div class="status-row status-position-row"><div class="status-no">✓</div><div><b>Posisi Saat Ini</b><p>${badge(d.status_verifikasi||'MENUNGGU VERIFIKASI DOKUMEN')}</p></div></div><div class="status-row"><div class="status-no">1.</div><div><b>Upload awal</b><p><b>Tanggal:</b> ${formatInputDateTimeV70(d.tanggal_upload)}</p><p><b>Oleh:</b> ${esc(d.upload_by||'-')}</p><p><b>File:</b> ${d.url_file?`<a href="${esc(d.url_file)}" target="_blank">${esc(d.nama_file||'Buka file')}</a>`:esc(d.nama_file||'-')}</p></div></div><div class="status-row"><div class="status-no">2.</div><div><b>Pemeriksaan Verifikator</b><p><b>Status:</b> ${esc(displayStatusTextV60(d.status_verifikasi||'MENUNGGU VERIFIKASI DOKUMEN'))}</p><p><b>Tanggal:</b> ${formatInputDateTimeV70(d.tanggal_verifikasi)}</p><p><b>Verifikator:</b> ${esc(d.verifikasi_by||'-')}</p><p><b>Catatan:</b> ${esc(cat)}</p></div></div>${d.tanggal_revisi?`<div class="status-row"><div class="status-no">3.</div><div><b>Upload ulang/perbaikan</b><p><b>Tanggal:</b> ${formatInputDateTimeV70(d.tanggal_revisi)}</p><p><b>Oleh:</b> ${esc(d.revisi_by||'-')}</p></div></div>`:''}${d.riwayat_dokumen?`<div class="status-row"><div class="status-no">R.</div><div><b>Riwayat Dokumen</b><p>${esc(normalizeVerifierHistoryV91(d.riwayat_dokumen)).replace(/\n/g,'<br>')}</p></div></div>`:''}</div></div></div>`;
+  document.getElementById('docStatusModal')?.remove();
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+
+/* =========================
+   SIMPROV v73
+   Perbandingan data sebelum dan sesudah perbaikan/perubahan perencanaan.
+   ========================= */
+function decodeCompareV73(line){
+  try{
+    const marker = "__COMPARE_V73__";
+    if(!String(line||"").startsWith(marker)) return null;
+    let b64 = String(line).slice(marker.length).replace(/-/g,"+").replace(/_/g,"/");
+    while(b64.length % 4) b64 += "=";
+    const bin = atob(b64);
+    const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+    return JSON.parse(new TextDecoder("utf-8").decode(bytes));
+  }catch(e){ return null; }
+}
+function getCompareHistoryV73(k){
+  return String(k?.riwayat_perubahan||"").split(/\n+/).map(decodeCompareV73).filter(Boolean);
+}
+function cleanRencanaHistoryV73(k){
+  return String(k?.riwayat_perubahan||"").split(/\n+/).filter(x => x && !x.startsWith("__COMPARE_V73__"));
+}
+function compareValV73(field, value){
+  if(["harga_satuan","jumlah"].includes(field)) return rupiah(toNumber(value));
+  if(field === "waktu_pemilihan") return value ? formatTanggalID(value) : "-";
+  return String(value ?? "-") || "-";
+}
+function renderCompareV73(c){
+  if(!c) return "";
+  const labels = {
+    nama_kegiatan:"Nama Kegiatan", keterangan:"Keterangan", volume:"Volume", satuan:"Satuan",
+    harga_satuan:"Harga Satuan", jumlah:"Jumlah", metode_pemilihan:"Metode", waktu_pemilihan:"Waktu Pemilihan"
+  };
+  const fields = Object.keys(labels);
+  const changed = fields.filter(f => String(c.sebelum?.[f] ?? "") !== String(c.sesudah?.[f] ?? ""));
+  const rows = fields.map(f => {
+    const beda = changed.includes(f);
+    return `<tr class="${beda?'compare-changed-v73':''}"><td><b>${labels[f]}</b>${beda?'<span class="compare-badge-v73">DIUBAH</span>':''}</td><td>${esc(compareValV73(f,c.sebelum?.[f]))}</td><td>${esc(compareValV73(f,c.sesudah?.[f]))}</td></tr>`;
+  }).join("");
+  return `<div class="compare-wrap-v73"><div class="compare-head-v73"><b>Perbandingan Sebelum & Setelah</b><span>${esc(c.waktu||"")} · ${esc(c.oleh||"User Bidang")}</span></div><div class="compare-table-scroll-v73"><table class="compare-table-v73"><thead><tr><th>Data</th><th>Sebelum</th><th>Setelah</th></tr></thead><tbody>${rows}</tbody></table></div>${changed.length?`<p class="compare-note-v73">${changed.length} bagian data mengalami perubahan.</p>`:`<p class="compare-note-v73">Tidak ada perbedaan nilai yang terdeteksi.</p>`}</div>`;
+}
+
+// Override final agar tombol Lihat Riwayat pada proses perbaikan menjadi Lihat Perubahan.
+const renderPerencanaanRowV72 = renderPerencanaanRow;
+renderPerencanaanRow = function(k){
+  let html = renderPerencanaanRowV72(k);
+  const st = String(k?.status_perencanaan||"").toUpperCase();
+  const isRepair = st === "DIAJUKAN" && (typeof isRencanaProsesPerbaikanV57 === "function" ? isRencanaProsesPerbaikanV57(k) : false);
+  if(isRepair && getCompareHistoryV73(k).length){
+    html = html.replace(/>Lihat Riwayat<\/button>/, '>Lihat Perubahan</button>');
+  }
+  return html;
+};
+
+// Override modal status perencanaan: tampilkan snapshot perubahan terbaru sebelum tombol Setujui/Minta Perbaikan digunakan.
+openRencanaStatusModal = function(idKegiatan){
+  const k = (dashboard?.perencanaan || []).find(x => String(x.id_kegiatan) === String(idKegiatan));
+  if(!k){ alert("Data perencanaan tidak ditemukan."); return; }
+  const st = String(k.status_perencanaan || "DIAJUKAN").toUpperCase();
+  const posisi = getRencanaPosisiSaatIni(k);
+  const jumlah = toNumber(k.jumlah || (toNumber(k.volume)*toNumber(k.harga_satuan)));
+  const compare = getCompareHistoryV73(k);
+  const latestCompare = compare.length ? compare[compare.length-1] : null;
+  const history = cleanRencanaHistoryV73(k);
+  const rows = [];
+  rows.push(`<div class="status-row status-position-row"><div class="status-no">✓</div><div><b>Posisi Saat Ini</b><p><span class="status-position-text ${st === "DISETUJUI" ? "pos-valid" : (st === "DITOLAK" ? "pos-repair" : "pos-wait")}">${esc(posisi)}</span></p></div></div>`);
+  if(latestCompare && ["DIAJUKAN","PERUBAHAN_DIAJUKAN"].includes(st)){
+    rows.push(`<div class="status-row compare-status-row-v73"><div class="status-no">↔</div><div><b>Data Perubahan yang Sedang Diajukan</b>${renderCompareV73(latestCompare)}</div></div>`);
+  }
+  rows.push(`<div class="status-row"><div class="status-no">1.</div><div><b>Data Perencanaan Saat Ini</b><p><b>Nama kegiatan:</b> ${esc(k.nama_kegiatan || "-")}</p><p><b>Bidang:</b> ${esc(bidangName(k.id_bidang))}</p><p><b>Jumlah:</b> ${rupiah(jumlah)}</p><p><b>Metode:</b> ${esc(k.metode_pemilihan || metodePemilihanByNilai(jumlah))}</p><p><b>Waktu Pemilihan:</b> ${esc(k.waktu_pemilihan ? formatTanggalID(k.waktu_pemilihan) : "-")}</p><p><b>Tanggal Input:</b> ${fmtDateTimeID(k.tanggal_input)}</p></div></div>`);
+  if(k.alasan_penolakan) rows.push(`<div class="status-row"><div class="status-no">2.</div><div><b>Catatan Verifikator Sebelumnya</b><p>${esc(k.alasan_penolakan)}</p></div></div>`);
+  if(k.alasan_perubahan || toNumber(k.perubahan_ke)) rows.push(`<div class="status-row"><div class="status-no">3.</div><div><b>Pengajuan Perubahan</b><p><b>Perubahan:</b> ${toNumber(k.perubahan_ke) ? `Perubahan Ke-${toNumber(k.perubahan_ke)}` : "-"}</p>${k.alasan_perubahan ? `<p><b>Alasan perubahan:</b> ${esc(k.alasan_perubahan)}</p>` : ""}</div></div>`);
+  if(history.length) rows.push(`<div class="status-row"><div class="status-no">R.</div><div><b>Riwayat Perencanaan</b><p>${history.map(x=>esc(x).replace(/\bADMIN\b/g,"Verifikator").replace(/\bAdmin\b/g,"Verifikator")).join("<br>")}</p></div></div>`);
+  const html = `<div class="status-modal-backdrop" id="rencanaStatusModal" onclick="if(event.target.id==='rencanaStatusModal') closeRencanaStatusModal()"><div class="status-modal-card status-modal-wide-v73"><div class="status-modal-head"><h3>${latestCompare ? "Perubahan Perencanaan" : "Status Perencanaan"}</h3><button type="button" onclick="closeRencanaStatusModal()">Tutup</button></div><div class="status-modal-body"><div class="status-doc-title"><b>${esc(k.nama_kegiatan || "-")}</b><span>${esc(k.id_kegiatan || "-")}</span></div>${rows.join("")}</div></div></div>`;
+  document.getElementById("rencanaStatusModal")?.remove();
+  document.body.insertAdjacentHTML("beforeend", html);
+};
+
+/* =========================
+   SIMPROV v74
+   1. Legenda warna tampil juga pada menu Perencanaan User Bidang.
+   2. Jika tahap pencairan kegiatan sudah SELESAI, aksi pada tabel
+      Perencanaan User Bidang menampilkan status SELESAI.
+   ========================= */
+function injectStatusLegendV74(){
+  const panels = Array.from(document.querySelectorAll('#contentArea .panel, #contentArea section'));
+  const panel = panels.find(p => p.querySelector('table') && /Data Perencanaan|Persetujuan Perencanaan|Pemeriksaan Data Perencanaan/i.test(p.textContent || ''));
+  if(!panel) return;
+  panel.querySelectorAll('.status-legend-v74').forEach(x => x.remove());
+  const tableWrap = panel.querySelector('.table-wrap') || panel.querySelector('table');
+  if(!tableWrap) return;
+  const legend = document.createElement('div');
+  legend.className = 'status-legend-v60 status-legend-v74';
+  legend.innerHTML = '<span><i class="l-green"></i>Disetujui / valid</span><span><i class="l-red"></i>Perlu perbaikan</span><span><i class="l-blue"></i>Diajukan / menunggu verifikasi</span><span><i class="l-yellow"></i>Menunggu verifikasi perbaikan</span>';
+  tableWrap.parentNode.insertBefore(legend, tableWrap);
+}
+
+if(typeof renderPerencanaan === 'function' && !window.__renderPerencanaanV74Wrapped){
+  window.__renderPerencanaanV74Wrapped = true;
+  const __renderPerencanaanBeforeV74 = renderPerencanaan;
+  renderPerencanaan = function(){
+    const result = __renderPerencanaanBeforeV74.apply(this, arguments);
+    setTimeout(injectStatusLegendV74, 0);
+    return result;
+  };
+}
+
+function isKegiatanSelesaiV74(idKegiatan){
+  const status = String(getPencairanStatus(idKegiatan) || '').trim().toUpperCase().replace(/_/g, ' ');
+  return status === 'SELESAI';
+}
+
+if(typeof renderPerencanaanRow === 'function' && !window.__renderPerencanaanRowV74Wrapped){
+  window.__renderPerencanaanRowV74Wrapped = true;
+  const __renderPerencanaanRowBeforeV74 = renderPerencanaanRow;
+  renderPerencanaanRow = function(k){
+    let html = __renderPerencanaanRowBeforeV74.apply(this, arguments);
+    if(!canVerifyPBJ() && !isReviewer() && isKegiatanSelesaiV74(k?.id_kegiatan)){
+      html = html.replace(
+        /<td class="nowrap aksi-perencanaan-v63">[\s\S]*?<\/td>/,
+        '<td class="nowrap aksi-perencanaan-v63"><span class="status-done-pill">SELESAI</span></td>'
+      );
+    }
+    return html;
+  };
+}
+
+
+/* =========================================================
+   SIMPROV v77 - Satu Verifikator Internal
+   - Satu role VERIFIKATOR menangani perencanaan, pemeriksaan dokumen,
+     dan finalisasi sesuai bidang penugasan.
+   - Legacy VERIFIKATOR_PBJ / VERIFIKATOR_KEUANGAN tetap dikenali.
+   - Identitas Ketua Umum dan Verifikator dapat diatur Admin.
+   ========================================================= */
+function roleNormV77(){
+  const r=String(currentUser?.role || currentUser?.id_bidang || '').toUpperCase().replace(/\s+/g,'_');
+  if(['VERIFIKATOR','VERIFIKATOR_PBJ','PBJ','VERIFIKATOR_KEUANGAN','KEUANGAN','VERIF_KEUANGAN'].includes(r)) return 'VERIFIKATOR';
+  return r;
+}
+function isVerifierV77(){ return roleNormV77()==='VERIFIKATOR'; }
+function isSuperAdminV65(){ return roleNormV77()==='ADMIN'; }
+function isPBJVerifierV65(){ return isSuperAdminV65() || isVerifierV77(); }
+function isKeuangan(){ return isVerifierV77(); }
+function isAdmin(){ return isSuperAdminV65(); }
+function canVerifyPBJ(){ return isSuperAdminV65() || isVerifierV77(); }
+function canVerifyKeuangan(){ return isSuperAdminV65() || isVerifierV77(); }
+function canFinalizePBJ(){ return isSuperAdminV65() || isVerifierV77(); }
+function isReviewer(){ return REVIEWER_ROLES.includes(roleCode()) || isVerifierV77(); }
+function canSeeAll(){ return isSuperAdminV65() || isReviewer(); }
+function roleLabel(){
+  if(isSuperAdminV65()) return 'ADMIN / SUPERADMIN';
+  if(isVerifierV77()) return 'VERIFIKATOR';
+  if(REVIEWER_ROLES.includes(roleCode())) return roleCode();
+  return 'BIDANG';
+}
+function renderMenu(){
+  let menus;
+  if(isSuperAdminV65()) menus=['Dashboard Monitoring','Struktur Anggaran','Perencanaan','Pencairan','Manajemen Akun'];
+  else if(isVerifierV77()) menus=['Dashboard Monitoring','Struktur Anggaran','Perencanaan','Pencairan','Laporan'];
+  else menus=isReviewer()?MENUS_REVIEWER:MENUS_USER;
+  if(!menus.includes(activeMenu)) activeMenu=menus[0];
+  document.getElementById('menuNav').innerHTML=menus.map(m=>`<button class="${activeMenu===m?'active':''}" onclick="setMenu('${m}')">${m}</button>`).join('');
+}
+function identityV77(){ return dashboard?.systemIdentity || {}; }
+function updateIdentityHeaderV77(){
+  const info=document.getElementById('userInfo');
+  if(!info) return;
+  const i=identityV77();
+  const ketua=i.ketua_umum ? `Ketua Umum: ${i.ketua_umum}` : 'Ketua Umum: belum diatur';
+  const ver=i.verifikator ? `Verifikator: ${i.verifikator}` : 'Verifikator: belum diatur';
+  let box=document.getElementById('systemIdentityV77');
+  if(!box){ box=document.createElement('div'); box.id='systemIdentityV77'; box.className='system-identity-v77'; info.insertAdjacentElement('afterend',box); }
+  box.innerHTML=`<span>${esc(ketua)}</span><span>${esc(ver)}</span>`;
+}
+const renderAllBeforeV77=renderAll;
+renderAll=function(){ renderAllBeforeV77(); updateIdentityHeaderV77(); };
+function verifierUsersV65(){ return (dashboard?.verifierUsers||[]).filter(u=>['VERIFIKATOR','VERIFIKATOR_PBJ','VERIFIKATOR_KEUANGAN','PBJ','KEUANGAN'].includes(String(u.role||'').toUpperCase())); }
+function renderManajemenAkunV65(){
+  if(!isSuperAdminV65()){ document.getElementById('contentArea').innerHTML='<section class="panel"><h3>Akses ditolak</h3></section>'; return; }
+  const users=verifierUsersV65();
+  const rows=users.map(u=>{
+    const ids=String(u.bidang_akses||'').split(',').map(x=>x.trim()).filter(Boolean);
+    const names=ids.map(id=>bidangName(id)).join(', ') || '-';
+    return `<div class="admin-budget-card account-card-v65"><div class="admin-budget-info"><b>${esc(u.nama||'-')}</b><small>${esc(u.id_user||'')} • ${esc(u.username||'')}</small></div><div><span class="badge badge-blue">VERIFIKATOR</span></div><div class="account-scope-text"><small>Bidang Penugasan</small><br>${esc(names)}</div><div>${badge(u.status||'AKTIF')}</div><div><button class="btn-mini" onclick="openEditVerifierV65('${esc(u.id_user)}')">Edit</button></div></div>`;
+  }).join('');
+  const i=identityV77();
+  document.getElementById('contentArea').innerHTML=`
+  <section class="panel fade-up premium-panel"><div class="panel-title-row"><div><h3>Identitas Penanggung Jawab</h3><p class="panel-sub">Nama ini tampil pada header dan digunakan sebagai identitas resmi aplikasi.</p></div></div><div class="form-grid"><div class="field"><label>Nama Ketua Umum</label><input id="ketuaUmumV77" value="${esc(i.ketua_umum||'')}" placeholder="Nama lengkap Ketua Umum"></div><div class="field"><label>Nama Verifikator</label><input id="verifikatorUtamaV77" value="${esc(i.verifikator||users[0]?.nama||'')}" placeholder="Nama lengkap Verifikator"></div></div><button onclick="saveIdentityV77()">Simpan Identitas</button><div id="identityMsgV77" class="msg"></div></section>
+  <section class="panel fade-up premium-panel"><div class="panel-title-row"><div><h3>Manajemen Akun Verifikator</h3><p class="panel-sub">Satu jenis Verifikator menangani perencanaan, dokumen, dan finalisasi sesuai bidang penugasannya.</p></div><button class="btn-refresh" onclick="openCreateVerifierV65()">+ Buat Akun</button></div><div class="admin-budget-list">${rows||'<p class="muted">Belum ada akun verifikator.</p>'}</div></section><div id="verifierModalV65" class="modal hidden"></div>`;
+}
+function verifierFormModalV65(u){
+  const editing=!!u; const selected=String(u?.bidang_akses||'').split(',').map(x=>x.trim()).filter(Boolean); const modal=document.getElementById('verifierModalV65');
+  modal.className='modal';
+  modal.innerHTML=`<div class="modal-card modal-wide"><div class="modal-head"><h3>${editing?'Edit':'Buat'} Akun Verifikator</h3><button onclick="closeVerifierModalV65()">×</button></div><div class="form-grid"><div class="field"><label>Nama Verifikator</label><input id="akunNama" value="${esc(u?.nama||'')}" placeholder="Contoh: Udin"></div><div class="field"><label>Role</label><input id="akunRoleDisplay" value="VERIFIKATOR" readonly><input type="hidden" id="akunRole" value="VERIFIKATOR"></div><div class="field"><label>Username</label><input id="akunUsername" value="${esc(u?.username||'')}" placeholder="udin_verifikator"></div><div class="field"><label>Password ${editing?'(kosongkan jika tidak diubah)':''}</label><input id="akunPassword" type="text" placeholder="Password akun"></div>${editing?`<div class="field"><label>Status</label><select id="akunStatus"><option value="AKTIF" ${String(u?.status).toUpperCase()==='AKTIF'?'selected':''}>AKTIF</option><option value="NONAKTIF" ${String(u?.status).toUpperCase()==='NONAKTIF'?'selected':''}>NONAKTIF</option></select></div>`:''}</div><div class="field"><label>Pilih Bidang Penugasan</label><div class="account-scope-grid">${bidangChecksV65(selected)}</div></div><div class="modal-actions"><button class="btn-soft" onclick="closeVerifierModalV65()">Batal</button><button onclick="saveVerifierV65('${esc(u?.id_user||'')}')">Simpan</button></div></div>`;
+}
+async function saveIdentityV77(){
+  const ketua_umum=document.getElementById('ketuaUmumV77')?.value.trim();
+  const verifikator=document.getElementById('verifikatorUtamaV77')?.value.trim();
+  if(!ketua_umum||!verifikator){ alert('Nama Ketua Umum dan Verifikator wajib diisi.'); return; }
+  showLoading('Menyimpan identitas...');
+  try{ const r=await apiPost({action:'saveSystemIdentity',user:currentUser,data:{ketua_umum,verifikator}}); alert(r.message); if(r.success){ dashboard.systemIdentity=r.identity; renderAll(); } }catch(e){alert(e.message)}finally{hideLoading();}
+}
+function normalizeDocStatusV77(v){
+  const s=String(v||'').toUpperCase();
+  if(s==='VALID KEUANGAN') return 'VALID DOKUMEN';
+  if(s==='PERBAIKAN KEUANGAN') return 'PERBAIKAN DOKUMEN';
+  if(s==='MENUNGGU VERIFIKASI KEUANGAN') return 'MENUNGGU VERIFIKASI DOKUMEN';
+  if(s==='MENUNGGU VERIFIKASI PERBAIKAN KEUANGAN') return 'MENUNGGU VERIFIKASI PERBAIKAN DOKUMEN';
+  if(s==='MENUNGGU VERIFIKASI PBJ') return 'MENUNGGU FINALISASI';
+  return s;
+}
+
+
+/* =========================================================
+   SIMPROV v78 - Dashboard Publik + Identitas Lengkap
+   ========================================================= */
+function showLoginFromPublic(){
+  document.getElementById('publicPage')?.classList.add('hidden');
+  document.getElementById('loginPage')?.classList.remove('hidden');
+  setTimeout(()=>document.getElementById('username')?.focus(),50);
+}
+function showPublicFromLogin(){
+  document.getElementById('loginPage')?.classList.add('hidden');
+  document.getElementById('publicPage')?.classList.remove('hidden');
+}
+function publicMetricCard(label,value,sub,cls=''){
+  return `<article class="public-metric ${cls}"><small>${esc(label)}</small><strong>${esc(value)}</strong>${sub?`<span>${esc(sub)}</span>`:''}</article>`;
+}
+async function loadPublicDashboard(force=false){
+  const sum=document.getElementById('publicSummary'); if(!sum) return;
+  if(force) sum.innerHTML='<div class="public-loading">Memperbarui data...</div>';
+  try{
+    const r=await apiPost({action:'getPublicDashboard'});
+    if(!r.success) throw new Error(r.message||'Gagal memuat dashboard publik');
+    const s=r.summary||{}, ident=r.identity||{};
+    document.getElementById('publicIdentity').innerHTML=[ident.ketua_umum&&`Ketua Umum: ${esc(ident.ketua_umum)}`,ident.sekretaris_umum&&`Sekretaris Umum: ${esc(ident.sekretaris_umum)}`,ident.verifikator&&`Verifikator: ${esc(ident.verifikator)}`].filter(Boolean).map(x=>`<span>${x}</span>`).join('');
+    sum.innerHTML=[
+      publicMetricCard('Total Pagu Keseluruhan',rupiah(s.total_pagu),'Seluruh anggaran','blue'),
+      publicMetricCard('Pagu Pengadaan',rupiah(s.pagu_pengadaan),'Alokasi pengadaan'),
+      publicMetricCard('Pagu Non Pengadaan',rupiah(s.pagu_non_pengadaan),'Alokasi non pengadaan'),
+      publicMetricCard('Perencanaan Keseluruhan',rupiah(s.perencanaan_total),`${s.jumlah_kegiatan||0} kegiatan`,'yellow'),
+      publicMetricCard('Realisasi Pengadaan',rupiah(s.realisasi_pengadaan),'Nilai yang telah disahkan','green'),
+      publicMetricCard('Realisasi Non Pengadaan',rupiah(s.realisasi_non_pengadaan),'Nilai yang telah disahkan','green'),
+      publicMetricCard('Realisasi Keseluruhan',rupiah(s.realisasi_total),`${Number(s.persentase_realisasi||0).toFixed(1)}% dari pagu`,'green'),
+      publicMetricCard('Sisa Pagu Anggaran',rupiah(s.sisa_pagu),'Pagu dikurangi realisasi','red'),
+      publicMetricCard('Kegiatan Pengadaan',String(s.jumlah_pengadaan||0),`${s.jumlah_selesai||0} kegiatan selesai`),
+      publicMetricCard('Kegiatan Non Pengadaan',String(s.jumlah_non_pengadaan||0),'Honorarium dan non pengadaan lainnya')
+    ].join('');
+    const pct=Math.max(0,Math.min(100,Number(s.persentase_realisasi||0)));
+    document.getElementById('publicProgress').innerHTML=`<div class="big-percent">${pct.toFixed(1)}%</div><div class="public-progress-track"><i style="width:${pct}%"></i></div><div class="public-progress-notes"><span>Realisasi ${rupiah(s.realisasi_total)}</span><span>Sisa ${rupiah(s.sisa_pagu)}</span></div>`;
+    const per=Number(s.perencanaan_total||0), pg=Number(s.perencanaan_pengadaan||0), np=Number(s.perencanaan_non_pengadaan||0); const ppg=per?pg/per*100:0;
+    document.getElementById('publicComposition').innerHTML=`<div class="composition-bar"><i style="width:${ppg}%"></i></div><div class="composition-legend"><span><b>Pengadaan</b>${rupiah(pg)}</span><span><b>Non Pengadaan</b>${rupiah(np)}</span></div>`;
+    const rows=(r.ringkasan||[]).map(x=>`<tr><td>${esc(x.nama_bidang||x.id_bidang)}</td><td>${rupiah(x.pagu)}</td><td>${rupiah(x.perencanaan_pengadaan)}</td><td>${rupiah(x.perencanaan_non_pengadaan)}</td><td>${x.jumlah_kegiatan||0}</td><td>${x.kegiatan_selesai||0}</td></tr>`).join('');
+    document.getElementById('publicBidangTable').innerHTML=`<table><thead><tr><th>Bidang</th><th>Pagu</th><th>Perencanaan Pengadaan</th><th>Perencanaan Non Pengadaan</th><th>Kegiatan</th><th>Selesai</th></tr></thead><tbody>${rows||'<tr><td colspan="6" class="empty">Belum ada data</td></tr>'}</tbody></table>`;
+  }catch(e){ sum.innerHTML=`<div class="public-error">Dashboard publik belum dapat dimuat: ${esc(e.message||e)}</div>`; }
+}
+
+// Identitas: Ketua Umum, Sekretaris Umum, dan Verifikator
+function updateIdentityHeaderV77(){
+  const info=document.getElementById('userInfo'); if(!info) return;
+  const i=identityV77();
+  const vals=[`Ketua Umum: ${i.ketua_umum||'belum diatur'}`,`Sekretaris Umum: ${i.sekretaris_umum||'belum diatur'}`,`Verifikator: ${i.verifikator||'belum diatur'}`];
+  let box=document.getElementById('systemIdentityV77');
+  if(!box){box=document.createElement('div');box.id='systemIdentityV77';box.className='system-identity-v77';info.insertAdjacentElement('afterend',box);}
+  box.innerHTML=vals.map(v=>`<span>${esc(v)}</span>`).join('');
+}
+const __renderManageV78=renderManajemenAkunV65;
+renderManajemenAkunV65=function(){
+  __renderManageV78();
+  const panel=document.querySelector('#contentArea .panel'); if(!panel) return;
+  const grid=panel.querySelector('.form-grid'); if(!grid||document.getElementById('sekretarisUmumV78')) return;
+  const i=identityV77();
+  const field=document.createElement('div');field.className='field';field.innerHTML=`<label>Nama Sekretaris Umum</label><input id="sekretarisUmumV78" value="${esc(i.sekretaris_umum||'')}" placeholder="Nama lengkap Sekretaris Umum">`;
+  const verField=Array.from(grid.children).find(x=>/Nama Verifikator/i.test(x.textContent||''));
+  grid.insertBefore(field,verField||null);
+};
+saveIdentityV77=async function(){
+  const ketua_umum=document.getElementById('ketuaUmumV77')?.value.trim();
+  const sekretaris_umum=document.getElementById('sekretarisUmumV78')?.value.trim();
+  const verifikator=document.getElementById('verifikatorUtamaV77')?.value.trim();
+  if(!ketua_umum||!sekretaris_umum||!verifikator){alert('Ketua Umum, Sekretaris Umum, dan Verifikator wajib diisi.');return;}
+  showLoading('Menyimpan identitas...');
+  try{const r=await apiPost({action:'saveSystemIdentity',user:currentUser,data:{ketua_umum,sekretaris_umum,verifikator}});alert(r.message);if(r.success){dashboard.systemIdentity=r.identity;renderAll();}}catch(e){alert(e.message)}finally{hideLoading();}
+};
+
+// Hilangkan legenda ganda: sisakan satu baris pada panel perencanaan.
+function dedupePlanningLegendsV78(){
+  document.querySelectorAll('#contentArea .panel, #contentArea section').forEach(panel=>{
+    if(!/Data Perencanaan|Persetujuan Perencanaan|Pemeriksaan Data Perencanaan/i.test(panel.textContent||'')) return;
+    const legends=Array.from(panel.querySelectorAll('.status-legend-v60,.status-legend-v74'));
+    legends.slice(1).forEach(x=>x.remove());
+  });
+}
+const __renderAllV78=renderAll;
+renderAll=function(){__renderAllV78();updateIdentityHeaderV77();setTimeout(dedupePlanningLegendsV78,0);};
+
+window.onload=async function(){
+  const saved=localStorage.getItem('siporbo_user');
+  if(saved){
+    currentUser=JSON.parse(saved);activeMenu=isAdmin()?'Dashboard Monitoring':'Struktur Anggaran';
+    document.getElementById('publicPage')?.classList.add('hidden');document.getElementById('loginPage')?.classList.add('hidden');document.getElementById('appPage')?.classList.remove('hidden');await loadDashboard(true);
+  }else{
+    document.getElementById('appPage')?.classList.add('hidden');document.getElementById('loginPage')?.classList.add('hidden');document.getElementById('publicPage')?.classList.remove('hidden');loadPublicDashboard(false);
+  }
+};
+
+/* =========================================================
+   SIMPROV v79 - UI NON PENGADAAN / HONORARIUM
+   ========================================================= */
+function isNonPengadaanV79(k){
+  return String(k?.kategori||k?.metode_pemilihan||'').toUpperCase().includes('NON');
+}
+renderMenu=function(){
+  let menus;
+  if(isSuperAdminV65()) menus=['Dashboard Monitoring','Struktur Anggaran','Perencanaan','Pencairan','Non Pengadaan','Manajemen Akun'];
+  else if(isVerifierV77()) menus=['Dashboard Monitoring','Struktur Anggaran','Perencanaan','Pencairan','Non Pengadaan','Laporan'];
+  else menus=isReviewer()?['Dashboard Monitoring','Struktur Anggaran','Perencanaan','Pencairan','Non Pengadaan','Laporan']:['Struktur Anggaran','Perencanaan','Pencairan','Non Pengadaan','Laporan'];
+  if(!menus.includes(activeMenu)) activeMenu=menus[0];
+  document.getElementById('menuNav').innerHTML=menus.map(m=>`<button class="${activeMenu===m?'active':''}" onclick="setMenu('${m}')">${m}</button>`).join('');
+};
+const __renderContentV79=renderContent;
+renderContent=function(){
+  if(activeMenu==='Non Pengadaan') return renderNonPengadaanV79();
+  return __renderContentV79();
+};
+
+const __renderPerencanaanV79=renderPerencanaan;
+renderPerencanaan=function(){
+  __renderPerencanaanV79();
+  if(canSeeAll()) return;
+  const nama=document.getElementById('namaKegiatan');
+  const grid=nama?.closest('.form-grid');
+  if(!grid||document.getElementById('kategoriPerencanaanV79')) return;
+  const kategori=document.createElement('div');
+  kategori.className='field';
+  kategori.innerHTML=`<label>Kategori Perencanaan</label><select id="kategoriPerencanaanV79" onchange="toggleKategoriV79()"><option value="PENGADAAN">Pengadaan</option><option value="NON PENGADAAN">Non Pengadaan</option></select>`;
+  grid.insertBefore(kategori,grid.firstElementChild);
+  const jenis=document.createElement('div');
+  jenis.className='field hidden';jenis.id='jenisNonWrapV79';
+  jenis.innerHTML=`<label>Jenis Non Pengadaan</label><select id="jenisNonPengadaanV79"><option>Honorarium</option><option>Perjalanan Dinas</option><option>Uang Saku</option><option>Hadiah/Penghargaan</option><option>Belanja Non Pengadaan Lainnya</option></select>`;
+  grid.insertBefore(jenis,kategori.nextSibling);
+  toggleKategoriV79();
+};
+function toggleKategoriV79(){
+  const non=document.getElementById('kategoriPerencanaanV79')?.value==='NON PENGADAAN';
+  document.getElementById('jenisNonWrapV79')?.classList.toggle('hidden',!non);
+  const metode=document.getElementById('metodePemilihan');
+  if(metode) metode.value=non?'NON PENGADAAN':'';
+}
+
+savePerencanaan=async function(){
+  if(!aksesPerencanaanTerbuka()){alert('Akses perencanaan bidang sedang ditutup.');return;}
+  const kategori=document.getElementById('kategoriPerencanaanV79')?.value||'PENGADAAN';
+  const data={
+    nama_kegiatan:document.getElementById('namaKegiatan').value,
+    rincian_kebutuhan:'',
+    keterangan:document.getElementById('keterangan').value,
+    volume:toNumber(document.getElementById('volume').value),
+    satuan:document.getElementById('satuan').value,
+    harga_satuan:toNumber(document.getElementById('harga').value),
+    metode_pemilihan:kategori==='NON PENGADAAN'?'NON PENGADAAN':(document.getElementById('metodePemilihan')?.value||''),
+    waktu_pemilihan:document.getElementById('waktuPemilihan')?.value||'',
+    kategori,
+    jenis_non_pengadaan:kategori==='NON PENGADAAN'?(document.getElementById('jenisNonPengadaanV79')?.value||'Honorarium'):''
+  };
+  if(!data.waktu_pemilihan){alert(kategori==='NON PENGADAAN'?'Waktu pelaksanaan wajib diisi.':'Waktu pemilihan wajib diisi.');return;}
+  const cek=cekPaguFrontend(data.volume*data.harga_satuan,'');
+  if(!cek.ok){alert(cek.message);return;}
+  showLoading('Mengajukan perencanaan...');
+  try{
+    const r=await apiPost({action:'savePerencanaan',user:currentUser,data});
+    document.getElementById('saveMsg').innerText=r.message;
+    if(!r.success) alert(r.message);
+    if(r.success) await loadDashboard(false);
+  }catch(e){alert(e.message)}finally{hideLoading();}
+};
+
+const __renderRowV79=renderPerencanaanRow;
+renderPerencanaanRow=function(k){
+  let html=__renderRowV79(k);
+  if(isNonPengadaanV79(k)){
+    html=html.replace(/<td>NON PENGADAAN<\/td>/i,`<td><b>NON PENGADAAN</b><br><small>${esc(k.jenis_non_pengadaan||'Honorarium')}</small></td>`);
+    if(!canManage()&&!isReviewer()&&String(k.status_perencanaan||'').toUpperCase()==='DISETUJUI'){
+      html=html.replace(/<td class="nowrap[^"]*">[\s\S]*?<\/td>\s*<\/tr>$/,`<td class="nowrap"><button class="btn-mini btn-green" onclick="openHonorModalV79('${esc(k.id_kegiatan)}')">Buat Dokumen</button></td></tr>`);
+    }
+  }
+  return html;
+};
+
+function latestNonV79(id){
+  return (dashboard.nonPengadaan||[]).filter(x=>String(x.id_kegiatan)===String(id)).sort((a,b)=>toNumber(b.versi_pdf)-toNumber(a.versi_pdf))[0];
+}
+function docsNonV79(id){
+  return (dashboard.dokumenNonPengadaan||[]).filter(x=>String(x.id_kegiatan)===String(id));
+}
+function renderNonPengadaanV79(){
+  const list=(dashboard.perencanaan||[]).filter(k=>isNonPengadaanV79(k)&&String(k.status_perencanaan||'').toUpperCase()==='DISETUJUI');
+  const cards=list.map(k=>{
+    const n=latestNonV79(k.id_kegiatan),docs=docsNonV79(k.id_kegiatan);
+    const wajib=['Tanda Terima','Bukti Potong Pajak'];
+    const uploaded=wajib.filter(j=>docs.some(d=>String(d.jenis_dokumen||'').toLowerCase()===j.toLowerCase())).length;
+    const valid=wajib.filter(j=>docs.some(d=>String(d.jenis_dokumen||'').toLowerCase()===j.toLowerCase()&&String(d.status_verifikasi||'').toUpperCase()==='VALID DOKUMEN')).length;
+    return `<article class="non-card-v79">
+      <div class="non-card-head-v79"><div><b>${esc(k.nama_kegiatan)}</b><small>${esc(k.id_kegiatan)} • ${esc(bidangName(k.id_bidang))}</small></div>${badge(n?n.status:'MENUNGGU PEMBUATAN DOKUMEN')}</div>
+      <div class="non-summary-v79">
+        <span><small>Jenis</small><b>${esc(k.jenis_non_pengadaan||'Honorarium')}</b></span>
+        <span><small>Nilai Perencanaan</small><b>${rupiah(k.jumlah)}</b></span>
+        <span><small>Total Bruto</small><b>${rupiah(n?.total_bruto||0)}</b></span>
+        <span><small>Total Pajak</small><b>${rupiah(n?.total_pajak||0)}</b></span>
+        <span><small>Total Netto</small><b>${rupiah(n?.total_netto||0)}</b></span>
+        <span><small>Dokumen Wajib</small><b>${uploaded}/2 terunggah • ${valid}/2 valid</b></span>
+      </div>
+      <div class="non-actions-v79">
+        ${!n?`<button class="btn-green" onclick="openHonorModalV79('${esc(k.id_kegiatan)}')">Buat Dokumen Honorarium</button>`:`<a class="btn-link-v79" target="_blank" href="${esc(n.url_pdf||'#')}">Download Dokumen V${esc(n.versi_pdf||1)}</a><button onclick="openHonorModalV79('${esc(k.id_kegiatan)}')">Buat Versi Baru</button>`}
+        ${n&&!canSeeAll()?`<select id="jenisNon_${esc(k.id_kegiatan)}"><option>Tanda Terima</option><option>Bukti Potong Pajak</option><option>Surat Tugas/SK</option><option>Daftar Hadir</option><option>Bukti Transfer/Pembayaran</option><option>Dokumen Pendukung Lainnya</option></select><input type="file" id="fileNon_${esc(k.id_kegiatan)}"><button onclick="uploadNonV79('${esc(k.id_kegiatan)}')">Upload Dokumen</button>`:''}
+      </div>
+      <div class="non-docs-v79">${docs.map(d=>`<div><span>${esc(d.jenis_dokumen)}</span><a target="_blank" href="${esc(d.url_file)}">${esc(d.nama_file||'Buka File')}</a>${badge(d.status_verifikasi||'MENUNGGU VERIFIKASI DOKUMEN')}${(canManage()||isVerifierV77())?`<button class="btn-mini btn-green" onclick="verifyNonV79('${esc(d.id_dokumen_non)}','VALID DOKUMEN')">Valid</button><button class="btn-mini btn-orange" onclick="verifyNonV79('${esc(d.id_dokumen_non)}','PERBAIKAN DOKUMEN')">Perbaikan</button>`:''}</div>`).join('')||'<p class="muted">Belum ada dokumen pendukung.</p>'}</div>
+    </article>`;
+  }).join('');
+  document.getElementById('contentArea').innerHTML=`<section class="panel fade-up premium-panel"><div class="panel-title-row"><div><h3>Non Pengadaan</h3><p class="panel-sub">Kegiatan Non Pengadaan dikelola pada menu ini. Buat dokumen honorarium, lalu unggah Tanda Terima dan Bukti Potong Pajak.</p></div><button class="btn-refresh" onclick="refreshData()">Refresh</button></div>${cards||'<p class="muted">Belum ada kegiatan Non Pengadaan yang disetujui.</p>'}</section><div id="honorModalV79" class="modal hidden"></div>`;
+}
+function honorRowV79(){
+  return `<div class="honor-row-v79"><input class="hnama" placeholder="Nama penerima"><input class="hnik" placeholder="NIK/NPWP (opsional)"><input class="hperan" placeholder="Jabatan/Peran"><input class="hvol" inputmode="numeric" value="1" placeholder="Volume"><input class="hsatuan" value="Orang/Kegiatan" placeholder="Satuan"><input class="htarif" inputmode="numeric" placeholder="Tarif honor" oninput="onAngkaInput(this)"><select class="hjenis"><option value="PERSENTASE">Persentase Pajak</option><option value="TIDAK DIPOTONG">Tidak Dipotong Pajak</option><option value="NOMINAL">Nominal Pajak Manual</option></select><input class="hpajak" inputmode="decimal" value="0" placeholder="Tarif % / nominal"><button class="btn-red" onclick="this.closest('.honor-row-v79').remove()">Hapus</button></div>`;
+}
+function openHonorModalV79(id){
+  const k=dashboard.perencanaan.find(x=>String(x.id_kegiatan)===String(id));if(!k)return;
+  let m=document.getElementById('honorModalV79');
+  if(!m){m=document.createElement('div');m.id='honorModalV79';m.className='modal hidden';document.body.appendChild(m);}
+  m.className='modal';
+  m.innerHTML=`<div class="modal-card modal-wide"><div class="modal-head"><div><h3>Buat Dokumen Honorarium</h3><p>${esc(k.nama_kegiatan)}</p></div><button onclick="document.getElementById('honorModalV79').classList.add('hidden')">×</button></div><input type="hidden" id="honorKegV79" value="${esc(id)}"><div id="honorRowsV79">${honorRowV79()}</div><button class="btn-soft" onclick="document.getElementById('honorRowsV79').insertAdjacentHTML('beforeend',honorRowV79())">+ Tambah Penerima</button><div class="modal-actions"><button class="btn-soft" onclick="document.getElementById('honorModalV79').classList.add('hidden')">Batal</button><button class="btn-green" onclick="generateHonorV79()">Buat PDF Honorarium</button></div></div>`;
+}
+async function generateHonorV79(){
+  const id=document.getElementById('honorKegV79').value;
+  const penerima=[...document.querySelectorAll('.honor-row-v79')].map(r=>({
+    nama_penerima:r.querySelector('.hnama').value,
+    nik_npwp:r.querySelector('.hnik').value,
+    jabatan_peran:r.querySelector('.hperan').value,
+    volume:toNumber(r.querySelector('.hvol').value),
+    satuan:r.querySelector('.hsatuan').value,
+    tarif_honor:toNumber(r.querySelector('.htarif').value),
+    jenis_pajak:r.querySelector('.hjenis').value,
+    tarif_pajak:toNumber(r.querySelector('.hpajak').value),
+    nilai_pajak:toNumber(r.querySelector('.hpajak').value)
+  }));
+  showLoading('Menyiapkan dokumen honorarium...');
+  try{
+    const res=await apiPost({action:'generateHonorPdf',user:currentUser,data:{id_kegiatan:id,penerima}});
+    alert(res.message);
+    if(res.success){document.getElementById('honorModalV79').classList.add('hidden');await loadDashboard(false);activeMenu='Non Pengadaan';renderAll();}
+  }catch(e){alert(e.message)}finally{hideLoading();}
+}
+async function uploadNonV79(id){
+  const file=document.getElementById('fileNon_'+id)?.files?.[0],jenis=document.getElementById('jenisNon_'+id)?.value;
+  if(!file){alert('Pilih file terlebih dahulu');return;}
+  showLoading('Mengupload dokumen...');
+  try{
+    const b64=await fileToBase64(file);
+    const r=await apiPost({action:'uploadDokumenNonPengadaan',user:currentUser,id_kegiatan:id,jenis_dokumen:jenis,file_name:file.name,mime_type:file.type,file_base64:b64});
+    alert(r.message);
+    if(r.success) await loadDashboard(false);
+  }catch(e){alert(e.message)}finally{hideLoading();}
+}
+async function verifyNonV79(id,status){
+  let note='';
+  if(status==='PERBAIKAN DOKUMEN'){note=prompt('Catatan perbaikan:')||'';if(!note)return;}
+  showLoading('Memperbarui status...');
+  try{
+    const r=await apiPost({action:'verifyDokumenNonPengadaan',user:currentUser,id_dokumen_non:id,status_verifikasi:status,catatan_verifikator:note});
+    alert(r.message);
+    if(r.success) await loadDashboard(false);
+  }catch(e){alert(e.message)}finally{hideLoading();}
+}
+
+/* =========================================================
+   SIMPROV v81 - Revisi Non Pengadaan, Realisasi, Layout Perencanaan
+   ========================================================= */
+function isNonKategoriV81(k){
+  return String(k?.kategori || '').toUpperCase() === 'NON PENGADAAN' || isNonPengadaanV79(k);
+}
+function getDashboardSummaryV81(){
+  const out = Object.assign({total_pagu:0,total_perencanaan:0,total_realisasi:0,realisasi_pengadaan:0,realisasi_non_pengadaan:0,sisa_pagu:0}, dashboard?.summary || {});
+  if(!dashboard) return out;
+  if(!out.total_pagu && Array.isArray(dashboard.rekap)) out.total_pagu = dashboard.rekap.reduce((s,r)=>s+toNumber(r.pagu),0);
+  if(!out.total_perencanaan && Array.isArray(dashboard.rekap)) out.total_perencanaan = dashboard.rekap.reduce((s,r)=>s+toNumber(r.total_perencanaan),0);
+  if(!out.total_realisasi){
+    if(Array.isArray(dashboard.realisasi) && dashboard.realisasi.length){
+      out.total_realisasi = dashboard.realisasi.filter(r=>['FINAL','DISETUJUI','SELESAI','SAH'].includes(String(r.status||'').toUpperCase())).reduce((s,r)=>s+toNumber(r.nilai_realisasi),0);
+    }else if(Array.isArray(dashboard.rekap)){
+      out.total_realisasi = dashboard.rekap.reduce((s,r)=>s+toNumber(r.total_realisasi),0);
+    }
+  }
+  if(!out.sisa_pagu) out.sisa_pagu = out.total_pagu - out.total_realisasi;
+  return out;
+}
+const __renderSummaryV81 = renderSummary;
+renderSummary = function(){
+  const wrap = document.getElementById('summaryCards'); if(!wrap || !dashboard){ if(wrap) wrap.innerHTML=''; return; }
+  const sum = getDashboardSummaryV81();
+  if(canSeeAll()){
+    const dok = (dashboard.dokumen||[]).length;
+    const valid = (dashboard.dokumen||[]).filter(isDocValidV64).length;
+    wrap.innerHTML = card('Total Pagu', rupiah(sum.total_pagu))
+      + card('Total Perencanaan', rupiah(sum.total_perencanaan))
+      + card('Total Realisasi', rupiah(sum.total_realisasi))
+      + card('Sisa Pagu', rupiah(sum.sisa_pagu))
+      + card('Dokumen Valid', `${valid}/${dok}`);
+  }else{
+    const r = (dashboard.rekap||[]).find(x=>String(x.id_bidang)===String(currentUser.id_bidang)) || {};
+    const realisasiBidang = toNumber(r.total_realisasi);
+    const sisaBidang = toNumber(r.pagu) - realisasiBidang;
+    wrap.innerHTML = card('Pagu Bidang', rupiah(r.pagu))
+      + card('Total Perencanaan', rupiah(r.total_perencanaan))
+      + card('Total Realisasi', rupiah(realisasiBidang))
+      + card('Sisa Pagu', rupiah(sisaBidang))
+      + card('Status Akses', r.status_akses || '-');
+  }
+};
+
+function syncNonPengadaanUiV81(){
+  const non = document.getElementById('kategoriPerencanaanV79')?.value === 'NON PENGADAAN';
+  const metodeInput = document.getElementById('metodePemilihan');
+  const metodeField = metodeInput?.closest('.field');
+  const metodePreview = document.getElementById('metodePreview');
+  const waktuLabel = document.querySelector('label[for="waktuPemilihan"]') || document.getElementById('waktuPemilihan')?.closest('.field')?.querySelector('label');
+  if(metodeField) metodeField.classList.toggle('hidden', non);
+  if(waktuLabel) waktuLabel.textContent = non ? 'Waktu Pelaksanaan' : 'Waktu Pemilihan';
+  if(metodeInput) metodeInput.value = non ? '' : metodeInput.value;
+  if(metodePreview){
+    if(non){
+      const jenis = document.getElementById('jenisNonPengadaanV79')?.value || 'Honorarium';
+      metodePreview.innerHTML = `<div class="metode-grid"><div class="metode-card"><span>KATEGORI</span><b>Non Pengadaan</b></div><div class="metode-card"><span>JENIS NON PENGADAAN</span><b>${esc(jenis)}</b></div></div><div class="doc-help-box"><b>Keterangan:</b> Non Pengadaan tidak menggunakan metode pemilihan. Setelah disetujui PBJ, proses dilanjutkan di menu <b>Non Pengadaan</b>.</div>`;
+    }
+  }
+}
+const __toggleKategoriV81 = toggleKategoriV79;
+toggleKategoriV79 = function(){ __toggleKategoriV81(); syncNonPengadaanUiV81(); };
+const __onAngkaInputV81 = onAngkaInput;
+onAngkaInput = function(el, volumeId='volume', hargaId='harga', totalId='totalPreview'){ __onAngkaInputV81(el, volumeId, hargaId, totalId); syncNonPengadaanUiV81(); };
+const __onWaktuPemilihanInputV81 = onWaktuPemilihanInput;
+onWaktuPemilihanInput = function(isEdit=false){ __onWaktuPemilihanInputV81(isEdit); syncNonPengadaanUiV81(); };
+
+const __renderPerencanaanV81 = renderPerencanaan;
+renderPerencanaan = function(){
+  __renderPerencanaanV81();
+  if(!canSeeAll()) { syncNonPengadaanUiV81(); const jenis=document.getElementById('jenisNonPengadaanV79'); if(jenis) jenis.onchange=syncNonPengadaanUiV81; }
+  const panels = [...document.querySelectorAll('#contentArea .panel')].filter(p=>/Persetujuan Perencanaan|Data Perencanaan|Pemeriksaan Data Perencanaan/i.test(p.textContent||''));
+  panels.forEach(panel=>{
+    panel.querySelectorAll('.table-hint').forEach(el=>el.remove());
+    const wrap = panel.querySelector('.table-wrap');
+    const table = panel.querySelector('table');
+    if(wrap) wrap.classList.add('planning-table-wrap-v81');
+    if(table) table.classList.add('planning-table-v81');
+  });
+};
+
+const __renderPerencanaanRowV81Base = renderPerencanaanRow;
+renderPerencanaanRow = function(k){
+  let html = __renderPerencanaanRowV81Base(k);
+  if(isNonKategoriV81(k)){
+    html = html.replace(/<td><b>NON PENGADAAN<\/b><br><small>([\s\S]*?)<\/small><\/td>/i, '<td class="text-center">-</td>');
+    html = html.replace(/(<td><b>)([\s\S]*?)(<\/b>)([\s\S]*?<\/td>)/i, `$1$2$3<br><small class="muted">Non Pengadaan • ${esc(k.jenis_non_pengadaan||'Honorarium')}</small>$4`);
+    html = html.replace(/(<td>)(?:\s*<b>NON PENGADAAN<\/b><br><small>[\s\S]*?<\/small>|NON PENGADAAN)(<\/td>)/i, '$1-$2');
+  }
+  return html;
+};
+
+function honorRowV79(){
+  return `<div class="honor-row-v81">
+    <div class="field"><label>Nama Penerima</label><input class="hnama" placeholder="Nama penerima"></div>
+    <div class="field"><label>NIK / NPWP</label><input class="hnik" placeholder="Opsional"></div>
+    <div class="field"><label>Jabatan / Peran</label><input class="hperan" placeholder="Contoh: Narasumber"></div>
+    <div class="field small"><label>Volume</label><input class="hvol" inputmode="numeric" value="1" placeholder="1"></div>
+    <div class="field small"><label>Satuan</label><input class="hsatuan" value="Orang/Kegiatan" placeholder="Satuan"></div>
+    <div class="field small"><label>Tarif Honor</label><input class="htarif" inputmode="numeric" placeholder="0" oninput="onAngkaInput(this)"></div>
+    <div class="field small"><label>Jenis Pajak</label><select class="hjenis"><option value="PERSENTASE">Persentase Pajak</option><option value="TIDAK DIPOTONG">Tidak Dipotong Pajak</option><option value="NOMINAL">Nominal Pajak Manual</option></select></div>
+    <div class="field small"><label>Tarif % / Nominal</label><input class="hpajak" inputmode="decimal" value="0" placeholder="0"></div>
+    <div class="honor-remove-wrap"><button class="btn-red" type="button" onclick="this.closest('.honor-row-v81').remove()">Hapus</button></div>
+  </div>`;
+}
+function openHonorModalV79(id){
+  const k=(dashboard.perencanaan||[]).find(x=>String(x.id_kegiatan)===String(id)); if(!k) return;
+  let m=document.getElementById('honorModalV79');
+  if(!m){ m=document.createElement('div'); m.id='honorModalV79'; m.className='modal hidden'; document.body.appendChild(m); }
+  m.className='modal';
+  m.innerHTML=`<div class="modal-card modal-wide honor-modal-v81 fade-up">
+    <div class="modal-head"><div><h3>Buat Dokumen Honorarium</h3><p>${esc(k.nama_kegiatan)} • ${esc(bidangName(k.id_bidang))}</p></div><button class="btn-soft" onclick="document.getElementById('honorModalV79').classList.add('hidden')">Tutup</button></div>
+    <input type="hidden" id="honorKegV79" value="${esc(id)}">
+    <div class="honor-modal-info-v81">
+      <div><span>ID Kegiatan</span><b>${esc(k.id_kegiatan)}</b></div>
+      <div><span>Jenis</span><b>${esc(k.jenis_non_pengadaan||'Honorarium')}</b></div>
+      <div><span>Nilai Perencanaan</span><b>${rupiah(k.jumlah)}</b></div>
+      <div><span>Petunjuk</span><b>Isi penerima honor dengan lengkap sebelum membuat dokumen.</b></div>
+    </div>
+    <div class="honor-modal-body-v81">
+      <div class="honor-head-row-v81"><span>Daftar Penerima Honorarium</span><button class="btn-soft" type="button" onclick="document.getElementById('honorRowsV79').insertAdjacentHTML('beforeend', honorRowV79())">+ Tambah Penerima</button></div>
+      <div id="honorRowsV79" class="honor-rows-v81">${honorRowV79()}</div>
+    </div>
+    <div class="modal-actions honor-actions-v81"><button class="btn-soft" onclick="document.getElementById('honorModalV79').classList.add('hidden')">Batal</button><button id="btnGenerateHonorV81" class="btn-green" onclick="generateHonorV79()">Buat Dokumen Honorarium</button></div>
+  </div>`;
+}
+async function generateHonorV79(){
+  const btn=document.getElementById('btnGenerateHonorV81');
+  if(btn?.dataset.busy==='1') return;
+  const id=document.getElementById('honorKegV79')?.value;
+  const penerima=[...document.querySelectorAll('.honor-row-v81')].map(r=>({
+    nama_penerima:r.querySelector('.hnama')?.value || '',
+    nik_npwp:r.querySelector('.hnik')?.value || '',
+    jabatan_peran:r.querySelector('.hperan')?.value || '',
+    volume:toNumber(r.querySelector('.hvol')?.value),
+    satuan:r.querySelector('.hsatuan')?.value || '',
+    tarif_honor:toNumber(r.querySelector('.htarif')?.value),
+    jenis_pajak:r.querySelector('.hjenis')?.value || 'PERSENTASE',
+    tarif_pajak:toNumber(r.querySelector('.hpajak')?.value),
+    nilai_pajak:toNumber(r.querySelector('.hpajak')?.value)
+  })).filter(x=>x.nama_penerima || x.tarif_honor || x.volume);
+  if(!penerima.length){ alert('Minimal satu penerima honor wajib diisi.'); return; }
+  if(btn){ btn.dataset.busy='1'; btn.disabled=true; btn.textContent='Memproses...'; }
+  showLoading('Menyiapkan dokumen honorarium...');
+  const wait=(ms)=>new Promise(res=>setTimeout(res,ms));
+  try{
+    let res=null;
+    for(let attempt=0; attempt<3; attempt++){
+      res = await apiPost({action:'generateHonorPdf',user:currentUser,data:{id_kegiatan:id,penerima}});
+      if(res?.success) break;
+      if(String(res?.message||'').includes('Server sedang memproses data')) await wait(1800*(attempt+1)); else break;
+    }
+    alert(res.message || 'Proses selesai');
+    if(res.success){ document.getElementById('honorModalV79')?.classList.add('hidden'); await loadDashboard(false); activeMenu='Non Pengadaan'; renderAll(); }
+  }catch(e){ alert(e.message || e); }
+  finally{ hideLoading(); if(btn){ btn.dataset.busy='0'; btn.disabled=false; btn.textContent='Buat Dokumen Honorarium'; } }
+}
+
+const __renderNonPengadaanV81 = renderNonPengadaanV79;
+renderNonPengadaanV79 = function(){ __renderNonPengadaanV81(); const modal=document.getElementById('honorModalV79'); if(modal) modal.classList.add('hidden'); };
+
+/* =========================================================
+   SIMPROV v82 - Dashboard Publik Ringkas + Cache + Layout Lebar
+   ========================================================= */
+function publicCacheKeyV82(){ return 'SIMPROV_PUBLIC_CACHE_V82'; }
+function readPublicCacheV82(){ try{ return JSON.parse(localStorage.getItem(publicCacheKeyV82())||'null'); }catch(e){ return null; } }
+function writePublicCacheV82(data){ try{ localStorage.setItem(publicCacheKeyV82(), JSON.stringify({savedAt:Date.now(), data})); }catch(e){} }
+function publicLoadingMarkupV82(text='Memuat dashboard publik...'){
+  return `<div class="public-loading public-loading-v82"><div class="public-spinner-v82"></div><div><b>${esc(text)}</b><small>Mohon tunggu sebentar</small></div></div>`;
+}
+function renderPublicDashboardV82(payload, fromCache=false){
+  const sum=document.getElementById('publicSummary'); if(!sum) return;
+  const s=payload.summary||{}, ident=payload.identity||{};
+  document.getElementById('publicIdentity').innerHTML=[ident.ketua_umum&&`Ketua Umum: ${esc(ident.ketua_umum)}`,ident.sekretaris_umum&&`Sekretaris Umum: ${esc(ident.sekretaris_umum)}`,ident.verifikator&&`Verifikator: ${esc(ident.verifikator)}`].filter(Boolean).map(x=>`<span>${x}</span>`).join('');
+  sum.innerHTML=[
+    publicMetricCard('Total Pagu', rupiah(s.total_pagu), 'Total anggaran keseluruhan', 'blue'),
+    publicMetricCard('Realisasi Pagu', rupiah(s.realisasi_total), `${Number(s.persentase_realisasi||0).toFixed(1)}% dari pagu`, 'green'),
+    publicMetricCard('Sisa Pagu', rupiah(s.sisa_pagu), 'Pagu dikurangi realisasi', 'red'),
+    publicMetricCard('Jumlah Kegiatan', String(s.jumlah_kegiatan||0), `${s.jumlah_selesai||0} kegiatan selesai`, 'yellow')
+  ].join('');
+  const pct=Math.max(0,Math.min(100,Number(s.persentase_realisasi||0)));
+  const progress=document.getElementById('publicProgress');
+  if(progress) progress.innerHTML=`<div class="big-percent">${pct.toFixed(1)}%</div><div class="public-progress-track"><i style="width:${pct}%"></i></div><div class="public-progress-notes"><span>Total Pagu ${rupiah(s.total_pagu)}</span><span>Realisasi ${rupiah(s.realisasi_total)}</span><span>Sisa ${rupiah(s.sisa_pagu)}</span></div>`;
+  const composition=document.getElementById('publicComposition');
+  if(composition) composition.innerHTML=`<div class="public-simple-stats-v82"><div><span>Total Perencanaan</span><b>${rupiah(s.perencanaan_total||0)}</b></div><div><span>Kegiatan Berjalan</span><b>${Math.max(0,(s.jumlah_kegiatan||0)-(s.jumlah_selesai||0))}</b></div><div><span>Kegiatan Selesai</span><b>${s.jumlah_selesai||0}</b></div></div>${fromCache?`<div class="public-cache-info-v82">Tampilan cache: ${dashboardCacheAgeText(payload.savedAt)}</div>`:''}`;
+  const panelTitles=document.querySelectorAll('#publicPage .public-panel h3');
+  if(panelTitles[1]) panelTitles[1].textContent='Ringkasan Kegiatan';
+  const rows=(payload.ringkasan||[]).map(x=>`<tr><td>${esc(x.nama_bidang||x.id_bidang)}</td><td>${rupiah(x.pagu)}</td><td>${rupiah(x.total_perencanaan || (Number(x.perencanaan_pengadaan||0)+Number(x.perencanaan_non_pengadaan||0)))}</td><td>${rupiah(x.realisasi_total||0)}</td><td>${rupiah(x.sisa_pagu||0)}</td><td>${x.jumlah_kegiatan||0}</td><td>${x.kegiatan_selesai||0}</td></tr>`).join('');
+  document.getElementById('publicBidangTable').innerHTML=`<table class="public-table-v82"><thead><tr><th>Bidang</th><th>Total Pagu</th><th>Total Perencanaan</th><th>Realisasi</th><th>Sisa Pagu</th><th>Kegiatan</th><th>Selesai</th></tr></thead><tbody>${rows||'<tr><td colspan="7" class="empty">Belum ada data</td></tr>'}</tbody></table>`;
+}
+loadPublicDashboard = async function(force=false){
+  const sum=document.getElementById('publicSummary'); if(!sum) return;
+  const progress=document.getElementById('publicProgress'); const composition=document.getElementById('publicComposition');
+  const cached = readPublicCacheV82();
+  let hasCache=false;
+  if(cached?.data && !force){
+    try{ renderPublicDashboardV82({...cached.data, savedAt:cached.savedAt}, true); hasCache=true; }catch(e){ console.warn('PUBLIC_CACHE_RENDER_FAILED', e); }
+  }
+  if(!hasCache || force){
+    sum.innerHTML = publicLoadingMarkupV82(force ? 'Memperbarui dashboard publik...' : 'Memuat dashboard publik...');
+    if(progress) progress.innerHTML = publicLoadingMarkupV82('Memuat progres...');
+    if(composition) composition.innerHTML = publicLoadingMarkupV82('Memuat ringkasan kegiatan...');
+  }else{
+    showFastCacheNotice(`Dashboard publik dimuat dari cache (${dashboardCacheAgeText(cached.savedAt)}). Sedang diperbarui...`);
+  }
+  try{
+    const r=await apiPost({action:'getPublicDashboard'});
+    if(!r.success) throw new Error(r.message||'Gagal memuat dashboard publik');
+    writePublicCacheV82(r);
+    renderPublicDashboardV82(r, false);
+  }catch(e){
+    if(!hasCache){
+      sum.innerHTML=`<div class="public-error">Dashboard publik belum dapat dimuat: ${esc(e.message||e)}</div>`;
+      if(progress) progress.innerHTML='';
+      if(composition) composition.innerHTML='';
+    }else{
+      showFastCacheNotice('Gagal memperbarui dashboard publik. Tampilan cache terakhir tetap digunakan.');
+    }
+  }
+};
+
+/* =========================================================
+   SIMPROV v83 - Pencatatan Pengadaan & Non Pengadaan
+   ========================================================= */
+const nonGroupCollapseV83 = {};
+function isProcurementV83(k){ return !isNonKategoriV81(k); }
+function canUploadNonV83(){ return !canManage() && !isReviewer(); }
+function menuItemsV83(){
+  if(isSuperAdminV65()) return [
+    ['Dashboard Monitoring','Dashboard Monitoring'],['Struktur Anggaran','Struktur Anggaran'],['Perencanaan','Perencanaan'],['Pencairan','Pencatatan Pengadaan'],['Non Pengadaan','Pencatatan Non Pengadaan'],['Manajemen Akun','Manajemen Akun']
+  ];
+  if(isVerifierV77()) return [
+    ['Dashboard Monitoring','Dashboard Monitoring'],['Struktur Anggaran','Struktur Anggaran'],['Perencanaan','Perencanaan'],['Pencairan','Pencatatan Pengadaan'],['Non Pengadaan','Pencatatan Non Pengadaan'],['Laporan','Laporan']
+  ];
+  if(isReviewer()) return [
+    ['Dashboard Monitoring','Dashboard Monitoring'],['Struktur Anggaran','Struktur Anggaran'],['Perencanaan','Perencanaan'],['Pencairan','Pencatatan Pengadaan'],['Non Pengadaan','Pencatatan Non Pengadaan'],['Laporan','Laporan']
+  ];
+  return [['Struktur Anggaran','Struktur Anggaran'],['Perencanaan','Perencanaan'],['Pencairan','Pencatatan Pengadaan'],['Non Pengadaan','Pencatatan Non Pengadaan'],['Laporan','Laporan']];
+}
+renderMenu=function(){
+  const menus=menuItemsV83();
+  if(!menus.some(x=>x[0]===activeMenu)) activeMenu=menus[0][0];
+  document.getElementById('menuNav').innerHTML=menus.map(([key,label])=>`<button class="${activeMenu===key?'active':''}" onclick="setMenu('${key}')">${label}</button>`).join('');
+};
+
+const __renderPencairanV83Base = renderPencairan;
+renderPencairan = function(){
+  const original = dashboard?.perencanaan || [];
+  if(dashboard) dashboard.perencanaan = original.filter(isProcurementV83);
+  try{ __renderPencairanV83Base(); }
+  finally{ if(dashboard) dashboard.perencanaan = original; }
+  const area=document.getElementById('contentArea'); if(!area) return;
+  area.querySelectorAll('h3').forEach(h=>{
+    if(/Upload Dokumen Pencairan/i.test(h.textContent)) h.textContent='Upload Dokumen Pengadaan';
+    if(/Data Dokumen & Pencairan/i.test(h.textContent)) h.textContent='Data Dokumen & Pencatatan Pengadaan';
+  });
+  area.querySelectorAll('.panel-sub').forEach(p=>{
+    p.innerHTML=p.innerHTML.replace(/pencairan/gi,'pencatatan pengadaan');
+  });
+};
+
+function nonDocTypesV83(){ return ['Tanda Terima','Bukti Potong Pajak']; }
+function nonDocOptionsV83(selected=''){
+  return nonDocTypesV83().map(x=>`<option value="${esc(x)}" ${x===selected?'selected':''}>${esc(x)}</option>`).join('');
+}
+function approvedNonActivitiesV83(){
+  return (dashboard?.perencanaan||[]).filter(k=>isNonKategoriV81(k) && String(k.status_perencanaan||'').toUpperCase()==='DISETUJUI');
+}
+function addNonUploadRowV83(){
+  document.getElementById('nonUploadRowsV83')?.insertAdjacentHTML('beforeend', `<div class="doc-upload-row non-upload-row-v83"><div class="field"><label>Jenis Dokumen</label><select class="jenisNonDokV83">${nonDocOptionsV83()}</select></div><div class="field"><label>File Dokumen</label><input type="file" class="fileNonDokV83"></div><button class="btn-red" type="button" onclick="this.closest('.non-upload-row-v83').remove()">Hapus</button></div>`);
+}
+async function uploadAllNonV83(){
+  const id=document.getElementById('nonKegiatanV83')?.value;
+  if(!id){ alert('Pilih kegiatan Non Pengadaan terlebih dahulu.'); return; }
+  const rows=[...document.querySelectorAll('.non-upload-row-v83')];
+  const selected=rows.map(r=>({jenis:r.querySelector('.jenisNonDokV83')?.value,file:r.querySelector('.fileNonDokV83')?.files?.[0]})).filter(x=>x.file);
+  if(!selected.length){ alert('Pilih minimal satu file dokumen.'); return; }
+  showLoading('Mengupload dokumen Non Pengadaan...');
+  try{
+    for(const item of selected){
+      const b64=await fileToBase64(item.file);
+      const res=await apiPost({action:'uploadDokumenNonPengadaan',user:currentUser,id_kegiatan:id,jenis_dokumen:item.jenis,file_name:item.file.name,mime_type:item.file.type,file_base64:b64});
+      if(!res.success) throw new Error(res.message||'Upload gagal');
+    }
+    alert('Dokumen Non Pengadaan berhasil diupload.');
+    await loadDashboard(false); activeMenu='Non Pengadaan'; renderAll();
+  }catch(e){ alert(e.message||e); }
+  finally{ hideLoading(); }
+}
+function toggleNonGroupV83(id){ nonGroupCollapseV83[id]=!(nonGroupCollapseV83[id]===undefined?true:nonGroupCollapseV83[id]); renderNonPengadaanV79(); }
+function nonStatusSummaryV83(docs){
+  if(!docs.length) return 'BELUM ADA DOKUMEN';
+  if(docs.some(d=>String(d.status_verifikasi||'').toUpperCase()==='PERBAIKAN DOKUMEN')) return 'PERBAIKAN DOKUMEN';
+  if(docs.every(d=>String(d.status_verifikasi||'').toUpperCase()==='VALID DOKUMEN')) return 'DOKUMEN VALID';
+  return 'MENUNGGU VERIFIKASI DOKUMEN';
+}
+renderNonPengadaanV79=function(){
+  const list=approvedNonActivitiesV83();
+  const uploadSection=canUploadNonV83()?`<section class="panel fade-up premium-panel collapsible-panel"><div class="panel-head"><div><h3>Upload Dokumen Non Pengadaan</h3><p class="panel-sub">Pilih kegiatan Non Pengadaan, kemudian upload satu atau beberapa dokumen pendukung.</p></div></div><div class="form-grid"><div class="field"><label>Pilih Kegiatan</label><select id="nonKegiatanV83">${list.map(k=>`<option value="${esc(k.id_kegiatan)}">${esc(k.nama_kegiatan)} - ${esc(k.jenis_non_pengadaan||'Non Pengadaan')}</option>`).join('')}</select></div></div><div id="nonUploadRowsV83"><div class="doc-upload-row non-upload-row-v83"><div class="field"><label>Jenis Dokumen</label><select class="jenisNonDokV83">${nonDocOptionsV83()}</select></div><div class="field"><label>File Dokumen</label><input type="file" class="fileNonDokV83"></div><button class="btn-red" type="button" onclick="this.closest('.non-upload-row-v83').remove()">Hapus</button></div></div><button class="btn-soft" type="button" onclick="addNonUploadRowV83()">+ Tambah File Dokumen</button> <button type="button" onclick="uploadAllNonV83()">Upload Semua Dokumen</button><div class="msg">${list.length?'':'Belum ada kegiatan Non Pengadaan yang disetujui Verifikator.'}</div></section>`:'';
+  const cards=list.map(k=>{
+    const n=latestNonV79(k.id_kegiatan), docs=docsNonV79(k.id_kegiatan), collapsed=nonGroupCollapseV83[k.id_kegiatan]===undefined?true:nonGroupCollapseV83[k.id_kegiatan];
+    const status=nonStatusSummaryV83(docs);
+    const docRows=docs.map(d=>`<div class="doc-item-v83"><div><b>${esc(d.jenis_dokumen)}</b><small>${esc(d.nama_file||'')}</small></div><a target="_blank" href="${esc(d.url_file||'#')}">Buka File</a>${badge(d.status_verifikasi||'MENUNGGU VERIFIKASI DOKUMEN')}<button class="btn-mini btn-soft" onclick="alert('${esc((d.catatan_verifikator||'Belum ada catatan').replace(/'/g,"\\'"))}')">Lihat Status</button>${(canManage()||isVerifierV77())?`<button class="btn-mini btn-green" onclick="verifyNonV79('${esc(d.id_dokumen_non)}','VALID DOKUMEN')">Valid</button><button class="btn-mini btn-orange" onclick="verifyNonV79('${esc(d.id_dokumen_non)}','PERBAIKAN DOKUMEN')">Perbaikan</button>`:''}</div>`).join('');
+    return `<article class="non-card-v83 ${status==='DOKUMEN VALID'?'is-valid':''}"><div class="non-card-head-v83"><div><b>${esc(k.nama_kegiatan)}</b><small>${esc(k.id_kegiatan)} • ${esc(bidangName(k.id_bidang))}</small><div class="v70-kegiatan-meta"><span><b>Jenis:</b> ${esc(k.jenis_non_pengadaan||'Non Pengadaan')}</span><span><b>Jumlah:</b> ${rupiah(k.jumlah)}</span><span><b>Waktu:</b> ${esc(formatTanggal(k.waktu_pemilihan)||'-')}</span></div></div><div class="non-card-right-v83">${badge(status)}<button class="btn-soft" onclick="toggleNonGroupV83('${esc(k.id_kegiatan)}')">${collapsed?'Lihat Rincian':'Minimize'}</button></div></div><div class="non-card-actions-v83">${String(k.jenis_non_pengadaan||'').toLowerCase().includes('honor')?(!n?.url_pdf?`<button class="btn-green" onclick="openHonorModalV79('${esc(k.id_kegiatan)}')">Buat Dokumen Honorarium</button>`:`<a class="btn-link-v79" target="_blank" href="${esc(n.url_pdf)}">Download Dokumen V${esc(n.versi_pdf||1)}</a><button class="btn-soft" onclick="openHonorModalV79('${esc(k.id_kegiatan)}')">Buat Versi Baru</button>`):''}<span>${docs.length} dokumen diupload</span></div><div class="non-card-body-v83 ${collapsed?'hidden':''}">${docRows||'<p class="muted">Belum ada dokumen yang diupload.</p>'}</div></article>`;
+  }).join('');
+  document.getElementById('contentArea').innerHTML=`${uploadSection}<section class="panel fade-up premium-panel"><div class="panel-title-row"><div><h3>Data Dokumen & Pencatatan Non Pengadaan</h3><p class="panel-sub">Seluruh kegiatan Non Pengadaan dikelola pada menu ini dan tidak masuk ke Pencatatan Pengadaan.</p></div><button class="btn-refresh" onclick="refreshData()">Refresh</button></div><div class="filter-card"><div class="toolbar"><div class="field"><label>Search Nama Kegiatan</label><input placeholder="Cari nama kegiatan..." oninput="filters.cairSearch=this.value"></div></div></div><div class="non-list-v83">${cards||'<div class="empty-box">Belum ada kegiatan Non Pengadaan yang disetujui.</div>'}</div></section><div id="honorModalV79" class="modal-backdrop hidden"></div>`;
+};
+
+openHonorModalV79=function(id){
+  const k=(dashboard.perencanaan||[]).find(x=>String(x.id_kegiatan)===String(id)); if(!k) return;
+  let m=document.getElementById('honorModalV79');
+  if(!m){ m=document.createElement('div'); m.id='honorModalV79'; document.body.appendChild(m); }
+  m.className='modal-backdrop honor-backdrop-v83';
+  m.innerHTML=`<div class="modal-card honor-modal-v83 fade-up"><div class="modal-head"><div><h3>Buat Dokumen Honorarium</h3><p>${esc(k.nama_kegiatan)} • ${esc(bidangName(k.id_bidang))}</p></div><button class="btn-soft" onclick="document.getElementById('honorModalV79').classList.add('hidden')">Tutup</button></div><input type="hidden" id="honorKegV79" value="${esc(id)}"><div class="honor-modal-info-v81"><div><span>ID Kegiatan</span><b>${esc(k.id_kegiatan)}</b></div><div><span>Jenis</span><b>${esc(k.jenis_non_pengadaan||'Honorarium')}</b></div><div><span>Nilai Perencanaan</span><b>${rupiah(k.jumlah)}</b></div><div><span>Petunjuk</span><b>Isi data penerima honor secara lengkap.</b></div></div><div class="honor-modal-body-v81"><div class="honor-head-row-v81"><span>Daftar Penerima Honorarium</span><button class="btn-soft" type="button" onclick="document.getElementById('honorRowsV79').insertAdjacentHTML('beforeend', honorRowV79())">+ Tambah Penerima</button></div><div id="honorRowsV79" class="honor-rows-v81">${honorRowV79()}</div></div><div class="modal-actions honor-actions-v81"><button class="btn-soft" onclick="document.getElementById('honorModalV79').classList.add('hidden')">Batal</button><button id="btnGenerateHonorV81" class="btn-green" onclick="generateHonorV79()">Buat Dokumen Honorarium</button></div></div>`;
+};
+
+/* =========================================================
+   SIMPROV v84 - Fix Final Non Pengadaan, PDF Honor, Mobile Table
+   ========================================================= */
+function isApprovedPlanningV84(status){
+  const s=String(status||'').toUpperCase().replace(/_/g,' ');
+  return s==='DISETUJUI' || s==='DISETUJUI PBJ' || s.startsWith('DISETUJUI');
+}
+function compactRupiahV84(value){
+  const n=Number(value||0), a=Math.abs(n);
+  const fmt=(x)=>Number.isInteger(x)?String(x):x.toFixed(1).replace('.',',');
+  if(a>=1e12) return 'Rp '+fmt(n/1e12)+' Triliun';
+  if(a>=1e9) return 'Rp '+fmt(n/1e9)+' Miliar';
+  if(a>=1e6) return 'Rp '+fmt(n/1e6)+' Juta';
+  if(a>=1e3) return 'Rp '+fmt(n/1e3)+' Ribu';
+  return rupiah(n);
+}
+approvedNonActivitiesV83=function(){
+  return (dashboard?.perencanaan||[]).filter(k=>isNonKategoriV81(k) && isApprovedPlanningV84(k.status_perencanaan));
+};
+
+/* Pastikan menu yang dipilih selalu merender modul yang benar. */
+renderContent=function(){
+  if(activeMenu==='Dashboard Monitoring') return renderMonitoring();
+  if(activeMenu==='Struktur Anggaran') return renderStrukturAnggaran();
+  if(activeMenu==='Perencanaan') return renderPerencanaan();
+  if(activeMenu==='Pencairan') return renderPencairan();
+  if(activeMenu==='Non Pengadaan') return renderNonPengadaanV79();
+  if(activeMenu==='Manajemen Akun') return renderManajemenAkunV65();
+  if(activeMenu==='Laporan') return renderLaporan();
+  return renderStrukturAnggaran();
+};
+setMenu=function(m){
+  activeMenu=m; perencanaanPage=1; pencairanPage=1;
+  renderMenu(); renderSummary(); renderContent(); updateIdentityHeaderV77();
+  window.scrollTo({top:0,behavior:'smooth'});
+};
+
+/* Dashboard publik: angka besar dibuat mudah dibaca. */
+renderPublicDashboardV82=function(payload, fromCache=false){
+  const sum=document.getElementById('publicSummary'); if(!sum) return;
+  const s=payload.summary||{}, ident=payload.identity||{};
+  document.getElementById('publicIdentity').innerHTML=[ident.ketua_umum&&`Ketua Umum: ${esc(ident.ketua_umum)}`,ident.sekretaris_umum&&`Sekretaris Umum: ${esc(ident.sekretaris_umum)}`,ident.verifikator&&`Verifikator: ${esc(ident.verifikator)}`].filter(Boolean).map(x=>`<span>${x}</span>`).join('');
+  sum.innerHTML=[
+    publicMetricCard('Total Pagu',compactRupiahV84(s.total_pagu),'Total anggaran keseluruhan','blue'),
+    publicMetricCard('Realisasi Pagu',compactRupiahV84(s.realisasi_total),`${Number(s.persentase_realisasi||0).toFixed(1)}% dari pagu`,'green'),
+    publicMetricCard('Sisa Pagu',compactRupiahV84(s.sisa_pagu),'Pagu dikurangi realisasi','red'),
+    publicMetricCard('Jumlah Kegiatan',String(s.jumlah_kegiatan||0),`${s.jumlah_selesai||0} kegiatan selesai`,'yellow')
+  ].join('');
+  const pct=Math.max(0,Math.min(100,Number(s.persentase_realisasi||0)));
+  const progress=document.getElementById('publicProgress');
+  if(progress) progress.innerHTML=`<div class="big-percent">${pct.toFixed(1)}%</div><div class="public-progress-track"><i style="width:${pct}%"></i></div><div class="public-progress-notes"><span>Total Pagu ${compactRupiahV84(s.total_pagu)}</span><span>Realisasi ${compactRupiahV84(s.realisasi_total)}</span><span>Sisa ${compactRupiahV84(s.sisa_pagu)}</span></div>`;
+  const composition=document.getElementById('publicComposition');
+  if(composition) composition.innerHTML=`<p class="public-system-note-v84">Ringkasan berikut hanya menghitung kegiatan yang sudah diinput ke dalam SIMPROV.</p><div class="public-simple-stats-v82"><div><span>Total Perencanaan Terinput</span><b>${compactRupiahV84(s.perencanaan_total||0)}</b></div><div><span>Kegiatan Terinput</span><b>${s.jumlah_kegiatan||0}</b></div><div><span>Kegiatan Selesai</span><b>${s.jumlah_selesai||0}</b></div></div>${fromCache?`<div class="public-cache-info-v82">Tampilan cache: ${dashboardCacheAgeText(payload.savedAt)}</div>`:''}`;
+  const rows=(payload.ringkasan||[]).map(x=>`<tr><td>${esc(x.nama_bidang||x.id_bidang)}</td><td title="${rupiah(x.pagu)}">${compactRupiahV84(x.pagu)}</td><td title="${rupiah(x.total_perencanaan||0)}">${compactRupiahV84(x.total_perencanaan||0)}</td><td title="${rupiah(x.realisasi_total||0)}">${compactRupiahV84(x.realisasi_total||0)}</td><td title="${rupiah(x.sisa_pagu||0)}">${compactRupiahV84(x.sisa_pagu||0)}</td><td>${x.jumlah_kegiatan||0}</td><td>${x.kegiatan_selesai||0}</td></tr>`).join('');
+  document.getElementById('publicBidangTable').innerHTML=`<table class="public-table-v82"><thead><tr><th>Bidang</th><th>Total Pagu</th><th>Total Perencanaan</th><th>Realisasi</th><th>Sisa Pagu</th><th>Kegiatan</th><th>Selesai</th></tr></thead><tbody>${rows||'<tr><td colspan="7" class="empty">Belum ada data</td></tr>'}</tbody></table>`;
+};
+
+/* Kartu Non Pengadaan tetap muncul walau PDF honor belum dibuat. */
+const __renderNonV84Base=renderNonPengadaanV79;
+renderNonPengadaanV79=function(){
+  __renderNonV84Base();
+  const list=approvedNonActivitiesV83();
+  const select=document.getElementById('nonKegiatanV83');
+  if(select && !select.options.length && list.length){
+    select.innerHTML=list.map(k=>`<option value="${esc(k.id_kegiatan)}">${esc(k.nama_kegiatan)} - ${esc(k.jenis_non_pengadaan||'Non Pengadaan')}</option>`).join('');
+  }
+};
+
+/* =========================================================
+   SIMPROV v86 - FINAL STABILITY FIX
+   Satu blok kompatibilitas untuk seluruh pemanggilan menu.
+   ========================================================= */
+function renderStrukturAnggaran(){ return renderStruktur(); }
+function formatTanggal(v){ return formatTanggalID(v); }
+
+function injectSinglePlanningLegendV86(){
+  const panels=[...document.querySelectorAll('#contentArea .panel, #contentArea section')];
+  const panel=panels.find(p=>p.querySelector('table') && /Data Perencanaan|Persetujuan Perencanaan|Pemeriksaan Data Perencanaan/i.test(p.textContent||''));
+  if(!panel) return;
+  panel.querySelectorAll('.status-legend-v60,.status-legend-v74').forEach(el=>el.remove());
+  const tableWrap=panel.querySelector('.table-wrap') || panel.querySelector('table');
+  if(!tableWrap || !tableWrap.parentNode) return;
+  const legend=document.createElement('div');
+  legend.className='status-legend-v60 status-legend-final-v86';
+  legend.innerHTML='<span><i class="l-green"></i>Disetujui / valid</span><span><i class="l-red"></i>Perlu perbaikan</span><span><i class="l-blue"></i>Diajukan / menunggu verifikasi</span><span><i class="l-yellow"></i>Menunggu verifikasi perbaikan</span>';
+  tableWrap.parentNode.insertBefore(legend,tableWrap);
+}
+injectStatusLegendV60=injectSinglePlanningLegendV86;
+injectStatusLegendV74=injectSinglePlanningLegendV86;
+dedupePlanningLegendsV78=injectSinglePlanningLegendV86;
+
+renderContent=function(){
+  if(activeMenu==='Dashboard Monitoring') return renderMonitoring();
+  if(activeMenu==='Struktur Anggaran') return renderStruktur();
+  if(activeMenu==='Perencanaan') return renderPerencanaan();
+  if(activeMenu==='Pencairan') return renderPencairan();
+  if(activeMenu==='Non Pengadaan') return renderNonPengadaanV79();
+  if(activeMenu==='Manajemen Akun') return renderManajemenAkunV65();
+  if(activeMenu==='Laporan') return typeof renderLaporan==='function' ? renderLaporan() : renderLaporanUser();
+  return renderStruktur();
+};
+
+renderAll=function(){
+  renderMenu();
+  renderSummary();
+  renderContent();
+  if(typeof updateIdentityHeaderV77==='function') updateIdentityHeaderV77();
+  setTimeout(injectSinglePlanningLegendV86,0);
+  setTimeout(injectSinglePlanningLegendV86,80);
+};
+
+setMenu=function(m){
+  activeMenu=m;
+  perencanaanPage=1;
+  pencairanPage=1;
+  renderAll();
+  window.scrollTo({top:0,behavior:'smooth'});
+};
+
+/* =========================================================
+   SIMPROV v87 - Honorarium Final: NIK 16 digit, PPh 21 otomatis,
+   dokumen terkunci setelah dibuat, dan modal lebih lebar.
+   ========================================================= */
+function honorTaxRateV87(category){
+  const c=String(category||'NON ASN').toUpperCase();
+  if(c==='ASN I-II') return 0;
+  if(c==='ASN III') return 5;
+  if(c==='ASN IV/PEJABAT') return 15;
+  return 2.5;
+}
+function syncHonorTaxV87(selectEl){
+  const row=selectEl.closest('.honor-row-v87');
+  const rate=honorTaxRateV87(selectEl.value);
+  const input=row?.querySelector('.hpajak');
+  if(input) input.value=String(rate).replace('.',',');
+}
+function honorRowV79(){
+  return `<div class="honor-row-v87">
+    <div class="field"><label>Nama Penerima</label><input class="hnama" placeholder="Nama lengkap" autocomplete="off"></div>
+    <div class="field"><label>NIK (16 Digit)</label><input class="hnik" inputmode="numeric" maxlength="16" pattern="[0-9]{16}" placeholder="16 digit angka" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,16)"></div>
+    <div class="field"><label>Jabatan / Peran</label><input class="hperan" placeholder="Contoh: Narasumber"></div>
+    <div class="field"><label>Volume</label><input class="hvol" inputmode="numeric" value="1" placeholder="1"></div>
+    <div class="field"><label>Satuan</label><input class="hsatuan" value="Orang/Kegiatan" placeholder="Satuan"></div>
+    <div class="field"><label>Tarif Honor</label><input class="htarif" inputmode="numeric" placeholder="0" oninput="onAngkaInput(this)"></div>
+    <div class="field"><label>Kategori Penerima</label><select class="hkategori" onchange="syncHonorTaxV87(this)"><option value="NON ASN">Non-ASN / Bukan Pegawai</option><option value="ASN I-II">ASN Golongan I–II</option><option value="ASN III">ASN Golongan III</option><option value="ASN IV/PEJABAT">ASN Golongan IV / Pejabat Negara</option></select></div>
+    <div class="field"><label>Tarif PPh 21</label><input class="hpajak" value="2,5" readonly></div>
+    <div class="honor-remove-wrap"><button class="btn-red" type="button" onclick="this.closest('.honor-row-v87').remove()">Hapus</button></div>
+  </div>`;
+}
+openHonorModalV79=function(id){
+  const k=(dashboard.perencanaan||[]).find(x=>String(x.id_kegiatan)===String(id)); if(!k) return;
+  const existing=latestNonV79(id);
+  if(existing?.url_pdf){ alert('Dokumen honorarium sudah dibuat dan tidak dapat diubah kembali.'); return; }
+  let m=document.getElementById('honorModalV79');
+  if(!m){m=document.createElement('div');m.id='honorModalV79';document.body.appendChild(m);}
+  m.className='modal-backdrop honor-backdrop-v87';
+  m.innerHTML=`<div class="modal-card honor-modal-v87 fade-up">
+    <div class="modal-head"><div><h3>Buat Dokumen Honorarium</h3><p>${esc(k.nama_kegiatan)} • ${esc(bidangName(k.id_bidang))}</p></div><button class="btn-soft" onclick="document.getElementById('honorModalV79').classList.add('hidden')">Tutup</button></div>
+    <input type="hidden" id="honorKegV79" value="${esc(id)}">
+    <div class="honor-modal-info-v81"><div><span>ID Kegiatan</span><b>${esc(k.id_kegiatan)}</b></div><div><span>Jenis</span><b>${esc(k.jenis_non_pengadaan||'Honorarium')}</b></div><div><span>Nilai Perencanaan</span><b>${rupiah(k.jumlah)}</b></div><div><span>Pajak</span><b>PPh Pasal 21 dihitung otomatis berdasarkan kategori penerima.</b></div></div>
+    <div class="honor-tax-note-v87"><b>Catatan:</b> honorarium orang pribadi dikenakan PPh Pasal 21, bukan PPN. Tarif otomatis: ASN Gol. I–II 0%, ASN Gol. III 5%, ASN Gol. IV/Pejabat 15%, dan Non-ASN menggunakan tarif efektif awal 2,5%.</div>
+    <div class="honor-modal-body-v81"><div class="honor-head-row-v81"><span>Daftar Penerima Honorarium</span><button class="btn-soft" type="button" onclick="document.getElementById('honorRowsV79').insertAdjacentHTML('beforeend',honorRowV79())">+ Tambah Penerima</button></div><div id="honorRowsV79" class="honor-rows-v87">${honorRowV79()}</div></div>
+    <div class="modal-actions honor-actions-v81"><button class="btn-soft" onclick="document.getElementById('honorModalV79').classList.add('hidden')">Batal</button><button id="btnGenerateHonorV81" class="btn-green" onclick="generateHonorV79()">Buat Dokumen Honorarium</button></div>
+  </div>`;
+};
+generateHonorV79=async function(){
+  const btn=document.getElementById('btnGenerateHonorV81'); if(btn?.dataset.busy==='1') return;
+  const id=document.getElementById('honorKegV79')?.value;
+  const rows=[...document.querySelectorAll('.honor-row-v87')];
+  const penerima=[];
+  for(let i=0;i<rows.length;i++){
+    const r=rows[i], nik=(r.querySelector('.hnik')?.value||'').replace(/\D/g,'');
+    const nama=r.querySelector('.hnama')?.value.trim()||'';
+    const volume=toNumber(r.querySelector('.hvol')?.value), tarif=toNumber(r.querySelector('.htarif')?.value);
+    if(!nama){alert(`Nama penerima ke-${i+1} wajib diisi.`);return;}
+    if(!/^\d{16}$/.test(nik)){alert(`NIK penerima ke-${i+1} wajib tepat 16 digit angka.`);return;}
+    if(!volume||!tarif){alert(`Volume dan tarif honor penerima ke-${i+1} wajib diisi.`);return;}
+    const kategori=r.querySelector('.hkategori')?.value||'NON ASN';
+    penerima.push({nama_penerima:nama,nik_npwp:nik,jabatan_peran:r.querySelector('.hperan')?.value||'',volume,satuan:r.querySelector('.hsatuan')?.value||'Orang/Kegiatan',tarif_honor:tarif,kategori_pajak:kategori,jenis_pajak:'PPh 21 OTOMATIS',tarif_pajak:honorTaxRateV87(kategori),nilai_pajak:0});
+  }
+  if(!penerima.length){alert('Minimal satu penerima honor wajib diisi.');return;}
+  if(btn){btn.dataset.busy='1';btn.disabled=true;btn.textContent='Memproses...';}
+  showLoading('Menyiapkan dokumen honorarium...');
+  try{
+    const res=await apiPost({action:'generateHonorPdf',user:currentUser,data:{id_kegiatan:id,penerima}});
+    alert(res.message||'Proses selesai');
+    if(res.success){document.getElementById('honorModalV79')?.classList.add('hidden');await loadDashboard(false);activeMenu='Non Pengadaan';renderAll();}
+  }catch(e){alert(e.message||e);}finally{hideLoading();if(btn){btn.dataset.busy='0';btn.disabled=false;btn.textContent='Buat Dokumen Honorarium';}}
+};
+
+const __renderNonPengadaanV87=renderNonPengadaanV79;
+renderNonPengadaanV79=function(){
+  __renderNonPengadaanV87();
+  document.querySelectorAll('.non-card-v83').forEach(card=>{
+    const link=card.querySelector('a.btn-link-v79');
+    if(link){
+      card.querySelectorAll('button').forEach(btn=>{if(/Buat Versi Baru|Buat Dokumen Honorarium/i.test(btn.textContent||'')){btn.disabled=true;btn.textContent='Dokumen Sudah Dibuat';btn.classList.add('btn-disabled-v87');}});
+    }
+  });
+};
+
+const __renderPlanningRowV87=renderPerencanaanRow;
+renderPerencanaanRow=function(k){
+  let html=__renderPlanningRowV87(k);
+  if(isNonKategoriV81(k) && latestNonV79(k.id_kegiatan)?.url_pdf){
+    html=html.replace(/<button[^>]*onclick="openHonorModalV79\('[^']+'\)"[^>]*>[^<]*<\/button>/i,'<button class="btn-mini btn-disabled-v87" disabled>Dokumen Sudah Dibuat</button>');
+  }
+  return html;
+};
+
+
+/* SIMPROV v88 - Aksi Perencanaan Stabil */
+const __renderPlanningRowV88 = renderPerencanaanRow;
+renderPerencanaanRow = function(k){
+  let html = __renderPlanningRowV88(k);
+  html = html.replace(/<td class="nowrap([^"]*)">([\s\S]*?)<\/td>\s*<\/tr>$/, function(_, cls, content){
+    return `<td class="nowrap${cls} action-cell-v88"><div class="action-buttons-v88">${content}</div></td></tr>`;
+  });
+  return html;
+};
+
+/* SIMPROV v89 - Verifikator dapat validasi dokumen Non Pengadaan sesuai bidang penugasan. */
+
+/* =========================================================
+   SIMPROV v90 - Penyelarasan Verifikasi Dokumen Pengadaan & Non Pengadaan
+   ========================================================= */
+const nonGroupCollapseV90 = {};
+function nonDocStatusV90(d){ return String(d?.status_verifikasi||'MENUNGGU VERIFIKASI DOKUMEN').toUpperCase(); }
+function isNonDocValidV90(d){ return nonDocStatusV90(d)==='VALID DOKUMEN'; }
+function isNonDocRepairV90(d){ return nonDocStatusV90(d)==='PERBAIKAN DOKUMEN'; }
+function canVerifyNonDocV90(d){ const s=nonDocStatusV90(d); return s.includes('MENUNGGU VERIFIKASI'); }
+function canBulkVerifyV90(){ return canVerifyKeuangan() || isVerifierV77() || isAdmin(); }
+function escapeJsTextV90(v){ return String(v||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\r?\n/g,'\\n'); }
+
+function toggleAllGroupChecksV90(kind,id,checked){
+  document.querySelectorAll(`input[data-bulk-kind="${kind}"][data-group-id="${CSS.escape(String(id))}"]`).forEach(x=>{if(!x.disabled)x.checked=checked;});
+}
+async function bulkVerifyGroupV90(kind,id){
+  if(!canBulkVerifyV90()){alert('Fitur ini hanya tersedia untuk Verifikator.');return;}
+  const isNon=kind==='non';
+  const docs=isNon?docsNonV79(id):(dashboard?.dokumen||[]).filter(d=>String(d.id_kegiatan)===String(id));
+  const actionable=docs.filter(d=>isNon?canVerifyNonDocV90(d):canVerifyDocumentNowV64(d));
+  if(!actionable.length){alert('Tidak ada dokumen yang sedang menunggu verifikasi.');return;}
+  const selected=new Set([...document.querySelectorAll(`input[data-bulk-kind="${kind}"][data-group-id="${CSS.escape(String(id))}"]:checked`)].map(x=>String(x.value)));
+  const validDocs=actionable.filter(d=>selected.has(String(isNon?d.id_dokumen_non:d.id_dokumen)));
+  const repairDocs=actionable.filter(d=>!selected.has(String(isNon?d.id_dokumen_non:d.id_dokumen)));
+  let note='';
+  if(repairDocs.length){
+    note=prompt(`${repairDocs.length} dokumen yang tidak dicentang akan ditetapkan PERBAIKAN. Masukkan catatan perbaikan umum:`)||'';
+    if(!note.trim()) return;
+  }
+  if(!confirm(`Proses ${actionable.length} dokumen?\n${validDocs.length} VALID\n${repairDocs.length} PERBAIKAN`)) return;
+  showLoading('Memproses verifikasi dokumen...');
+  try{
+    for(const d of validDocs){
+      const payload=isNon?{action:'verifyDokumenNonPengadaan',user:currentUser,id_dokumen_non:d.id_dokumen_non,status_verifikasi:'VALID DOKUMEN',catatan_verifikator:''}:{action:'verifyDokumen',user:currentUser,id_dokumen:d.id_dokumen,status_verifikasi:'VALID',catatan_admin:''};
+      const r=await apiPost(payload); if(!r.success) throw new Error(r.message||'Gagal memvalidasi dokumen');
+    }
+    for(const d of repairDocs){
+      const payload=isNon?{action:'verifyDokumenNonPengadaan',user:currentUser,id_dokumen_non:d.id_dokumen_non,status_verifikasi:'PERBAIKAN DOKUMEN',catatan_verifikator:note}:{action:'verifyDokumen',user:currentUser,id_dokumen:d.id_dokumen,status_verifikasi:'PERBAIKAN',catatan_admin:note};
+      const r=await apiPost(payload); if(!r.success) throw new Error(r.message||'Gagal menetapkan perbaikan dokumen');
+    }
+    await loadDashboard(false);
+    alert('Verifikasi dokumen berhasil diproses.');
+  }catch(e){alert(e.message||e);}finally{hideLoading();}
+}
+
+function openNonDocStatusModalV90(id){
+  const d=(dashboard?.dokumenNonPengadaan||[]).find(x=>String(x.id_dokumen_non)===String(id)); if(!d) return;
+  const k=(dashboard?.perencanaan||[]).find(x=>String(x.id_kegiatan)===String(d.id_kegiatan))||{};
+  const history=String(d.riwayat_dokumen||'').split(/\n+/).filter(Boolean);
+  const m=document.createElement('div');m.className='modal-backdrop';m.id='nonStatusModalV90';
+  m.innerHTML=`<div class="modal-card doc-status-modal-v90"><div class="modal-head"><div><h3>Status & Riwayat Dokumen</h3><p>${esc(d.jenis_dokumen||'-')}</p></div><button class="btn-soft" onclick="document.getElementById('nonStatusModalV90')?.remove()">Tutup</button></div>
+  <div class="status-detail-grid-v90"><div><span>Nama Kegiatan</span><b>${esc(k.nama_kegiatan||'-')}</b></div><div><span>Bidang</span><b>${esc(bidangName(d.id_bidang))}</b></div><div><span>Status</span>${badge(d.status_verifikasi||'MENUNGGU VERIFIKASI DOKUMEN')}</div><div><span>File</span><b>${d.url_file?`<a href="${esc(d.url_file)}" target="_blank">${esc(d.nama_file||'Buka File')}</a>`:esc(d.nama_file||'-')}</b></div><div><span>Upload Oleh</span><b>${esc(d.upload_by||'-')}</b></div><div><span>Verifikasi Oleh</span><b>${esc(d.verifikasi_by||'-')}</b></div></div>
+  <div class="status-note-v90"><b>Catatan Verifikator</b><p>${esc(d.catatan_verifikator||'Belum ada catatan.')}</p></div>
+  <div class="status-history-v90"><b>Riwayat Dokumen</b>${history.length?history.map(x=>`<div>${esc(normalizeVerifierHistoryV91(x))}</div>`).join(''):'<p class="muted">Belum ada riwayat tambahan.</p>'}</div></div>`;
+  document.body.appendChild(m);
+}
+async function revisiNonDokumenV90(id){
+  const input=document.getElementById('revisiNon_'+id),file=input?.files?.[0];
+  if(!file){alert('Pilih file perbaikan terlebih dahulu.');return;}
+  showLoading('Mengupload perbaikan dokumen...');
+  try{const b64=await fileToBase64(file);const r=await apiPost({action:'revisiDokumenNonPengadaan',user:currentUser,id_dokumen_non:id,file_name:file.name,mime_type:file.type,file_base64:b64});alert(r.message);if(r.success)await loadDashboard(false);}catch(e){alert(e.message||e);}finally{hideLoading();}
+}
+
+/* Pencatatan Pengadaan: default minimize + verifikasi satuan maupun massal */
+renderDokumenGroupRow=function(g){
+  const stGroup=groupDocStatus(g),stCair=effectivePencairanStatusV68(g),stCairU=String(stCair||'').toUpperCase();
+  const isCollapsed=docGroupCollapse[g.id_kegiatan]===undefined?true:!!docGroupCollapse[g.id_kegiatan];
+  const colorClass=docGroupColorClassV62(g),docs=g.docs||[];
+  const docsHtml=docs.map(d=>{
+    let actionHtml='<span class="muted">-</span>';
+    if(canVerifyKeuangan()){
+      if(canVerifyDocumentNowV64(d)) actionHtml=`<div class="doc-file-actions v59-file-actions"><button class="btn-mini btn-green" onclick="verifDok('${esc(d.id_dokumen)}','VALID')">Valid</button><button class="btn-mini btn-orange" onclick="mintaPerbaikanDok('${esc(d.id_dokumen)}')">Perbaikan</button></div>`;
+      else actionHtml='<div class="doc-file-actions v59-file-actions"><button class="btn-mini btn-disabled" disabled>Valid</button><button class="btn-mini btn-disabled" disabled>Perbaikan</button></div>';
+    }else if(isAdmin()||isReviewer()) actionHtml='<span class="audit-pill">Read-only</span>';
+    else if(isDocRepairV64(d)) actionHtml=`<div class="doc-action-box per-file-revision compact-revision"><div class="revision-title">Upload Ulang</div><input type="file" id="revisi_${esc(d.id_dokumen)}"><button class="btn-mini btn-upload-ulang" onclick="revisiDokumen('${esc(d.id_dokumen)}')">Kirim File</button></div>`;
+    const check=canVerifyKeuangan()&&canVerifyDocumentNowV64(d)?`<label class="bulk-check-v90" title="Centang jika dokumen valid"><input type="checkbox" data-bulk-kind="proc" data-group-id="${esc(g.id_kegiatan)}" value="${esc(d.id_dokumen)}"><span>Valid</span></label>`:'';
+    return `<div class="doc-item doc-item-v47 ${isDocRepairV64(d)?'doc-item-repair':(isDocValidV64(d)?'doc-item-valid':'doc-item-wait')}">${check}<div class="doc-main-info"><b>${esc(normalizeJenisDokumenLabel(d.jenis_dokumen)||'-')}</b><small class="muted">${esc(d.nama_file||'-')}</small></div><div class="doc-link">${d.url_file?`<a href="${esc(d.url_file)}" target="_blank">Buka File</a>`:esc(d.nama_file||'-')}</div><div class="doc-status">${badge(d.status_verifikasi||'MENUNGGU VERIFIKASI DOKUMEN')}</div><div class="doc-file-note-action compact-status-action v59-status-action"><button class="btn-mini btn-detail" onclick="openDocStatusModal('${esc(d.id_dokumen)}')">Lihat Status</button>${actionHtml}</div></div>`;
+  }).join('');
+  const actionable=docs.filter(canVerifyDocumentNowV64).length;
+  const bulk=canVerifyKeuangan()&&actionable?`<div class="bulk-toolbar-v90"><label><input type="checkbox" onchange="toggleAllGroupChecksV90('proc','${esc(g.id_kegiatan)}',this.checked)"> Centang semua sebagai valid</label><button class="btn-mini btn-green" onclick="bulkVerifyGroupV90('proc','${esc(g.id_kegiatan)}')">Proses Pilihan</button><small>Dicentang = Valid, tidak dicentang = Perbaikan</small></div>`:'';
+  let finalAction='<span class="muted">-</span>';
+  if(canFinalizePBJ()){if(stCairU==='SELESAI')finalAction='<span class="status-done-pill">SELESAI</span>';else if(allDocsValidKeuanganV64(g.id_kegiatan))finalAction=`<button class="btn-mini btn-green btn-wide" onclick="selesaikanKegiatanPBJ('${esc(g.id_kegiatan)}')">Selesaikan Kegiatan</button>`;else finalAction='<button class="btn-mini btn-disabled btn-wide" disabled>Menunggu Valid Dokumen</button>';}
+  return `<tr><td class="doc-group-card ${colorClass}"><div class="doc-group-head doc-group-head-v12"><div class="doc-group-title"><b>${esc(kegiatanName(g.id_kegiatan))}</b><small>${esc(g.id_kegiatan)}</small></div><div><small class="muted">Bidang</small><br><b>${esc(bidangName(g.id_bidang))}</b></div><div><small class="muted">Status Dokumen</small><br>${badge(stGroup)}</div><div><small class="muted">Status Pencatatan</small><br>${badge(stCair)}</div><div class="doc-toggle-wrap"><button class="btn-mini btn-detail" onclick="toggleDocGroup('${esc(g.id_kegiatan)}')">${isCollapsed?'Lihat Rincian':'Minimize'}</button></div></div><div class="doc-list ${isCollapsed?'hidden':''}">${bulk}${docsHtml}</div><div class="doc-group-head doc-group-foot-v12 v69-final-action"><div class="group-reason"><b>Rekap:</b> ${docs.length} file dokumen. ${isCollapsed?'Klik Lihat Rincian untuk membuka daftar file.':'Validasi dapat dilakukan satu per satu atau sekaligus melalui pilihan centang.'}</div><div></div><div></div><div></div>${finalAction}</div></td></tr>`;
+};
+
+/* Pencatatan Non Pengadaan: mekanisme dan tampilan setara Pengadaan */
+function toggleNonGroupV90(id){nonGroupCollapseV90[id]=!(nonGroupCollapseV90[id]===undefined?true:nonGroupCollapseV90[id]);renderNonPengadaanV79();}
+renderNonPengadaanV79=function(){
+  const list=approvedNonActivitiesV83();
+  const uploadSection=canUploadNonV83()?`<section class="panel fade-up premium-panel collapsible-panel"><div class="panel-head"><div><h3>Upload Dokumen Non Pengadaan</h3><p class="panel-sub">Pilih kegiatan lalu upload satu atau beberapa dokumen pendukung.</p></div></div><div class="form-grid"><div class="field"><label>Pilih Kegiatan</label><select id="nonKegiatanV83">${list.map(k=>`<option value="${esc(k.id_kegiatan)}">${esc(k.nama_kegiatan)} - ${esc(k.jenis_non_pengadaan||'Non Pengadaan')}</option>`).join('')}</select></div></div><div id="nonUploadRowsV83"><div class="doc-upload-row non-upload-row-v83"><div class="field"><label>Jenis Dokumen</label><select class="jenisNonDokV83">${nonDocOptionsV83()}</select></div><div class="field"><label>File Dokumen</label><input type="file" class="fileNonDokV83"></div><button class="btn-red" type="button" onclick="this.closest('.non-upload-row-v83').remove()">Hapus</button></div></div><button class="btn-soft" type="button" onclick="addNonUploadRowV83()">+ Tambah File Dokumen</button> <button type="button" onclick="uploadAllNonV83()">Upload Semua Dokumen</button></section>`:'';
+  const cards=list.map(k=>{
+    const n=latestNonV79(k.id_kegiatan),docs=docsNonV79(k.id_kegiatan),collapsed=nonGroupCollapseV90[k.id_kegiatan]===undefined?true:!!nonGroupCollapseV90[k.id_kegiatan],status=nonStatusSummaryV83(docs);
+    const rows=docs.map(d=>{
+      let action='<span class="muted">-</span>';
+      if(canBulkVerifyV90()){
+        if(canVerifyNonDocV90(d)) action=`<div class="doc-file-actions"><button class="btn-mini btn-green" onclick="verifyNonV79('${esc(d.id_dokumen_non)}','VALID DOKUMEN')">Valid</button><button class="btn-mini btn-orange" onclick="verifyNonV79('${esc(d.id_dokumen_non)}','PERBAIKAN DOKUMEN')">Perbaikan</button></div>`;
+        else action='<div class="doc-file-actions"><button class="btn-mini btn-disabled" disabled>Valid</button><button class="btn-mini btn-disabled" disabled>Perbaikan</button></div>';
+      }else if(isNonDocRepairV90(d)) action=`<div class="doc-action-box per-file-revision compact-revision"><div class="revision-title">Upload Ulang</div><input type="file" id="revisiNon_${esc(d.id_dokumen_non)}"><button class="btn-mini btn-upload-ulang" onclick="revisiNonDokumenV90('${esc(d.id_dokumen_non)}')">Kirim File</button></div>`;
+      const check=canBulkVerifyV90()&&canVerifyNonDocV90(d)?`<label class="bulk-check-v90" title="Centang jika dokumen valid"><input type="checkbox" data-bulk-kind="non" data-group-id="${esc(k.id_kegiatan)}" value="${esc(d.id_dokumen_non)}"><span>Valid</span></label>`:'';
+      return `<div class="doc-item doc-item-v47 ${isNonDocRepairV90(d)?'doc-item-repair':(isNonDocValidV90(d)?'doc-item-valid':'doc-item-wait')}">${check}<div class="doc-main-info"><b>${esc(d.jenis_dokumen||'-')}</b><small class="muted">${esc(d.nama_file||'-')}</small></div><div class="doc-link">${d.url_file?`<a href="${esc(d.url_file)}" target="_blank">Buka File</a>`:'-'}</div><div class="doc-status">${badge(d.status_verifikasi||'MENUNGGU VERIFIKASI DOKUMEN')}</div><div class="doc-file-note-action compact-status-action"><button class="btn-mini btn-detail" onclick="openNonDocStatusModalV90('${esc(d.id_dokumen_non)}')">Lihat Status</button>${action}</div></div>`;
+    }).join('');
+    const actionable=docs.filter(canVerifyNonDocV90).length;
+    const bulk=canBulkVerifyV90()&&actionable?`<div class="bulk-toolbar-v90"><label><input type="checkbox" onchange="toggleAllGroupChecksV90('non','${esc(k.id_kegiatan)}',this.checked)"> Centang semua sebagai valid</label><button class="btn-mini btn-green" onclick="bulkVerifyGroupV90('non','${esc(k.id_kegiatan)}')">Proses Pilihan</button><small>Dicentang = Valid, tidak dicentang = Perbaikan</small></div>`:'';
+    const honorAction=String(k.jenis_non_pengadaan||'').toLowerCase().includes('honor')?(n?.url_pdf?`<a class="btn-link-v79" target="_blank" href="${esc(n.url_pdf)}">Download Dokumen V${esc(n.versi_pdf||1)}</a><button class="btn-soft btn-disabled-v87" disabled>Dokumen Sudah Dibuat</button>`:`<button class="btn-green" onclick="openHonorModalV79('${esc(k.id_kegiatan)}')">Buat Dokumen Honorarium</button>`):'';
+    return `<article class="non-card-v83 ${status==='DOKUMEN VALID'?'is-valid':''}"><div class="non-card-head-v83"><div><b>${esc(k.nama_kegiatan)}</b><small>${esc(k.id_kegiatan)} • ${esc(bidangName(k.id_bidang))}</small><div class="v70-kegiatan-meta"><span><b>Jenis:</b> ${esc(k.jenis_non_pengadaan||'Non Pengadaan')}</span><span><b>Jumlah:</b> ${rupiah(k.jumlah)}</span><span><b>Waktu:</b> ${esc(formatTanggal(k.waktu_pemilihan)||'-')}</span></div></div><div class="non-card-right-v83">${badge(status)}<button class="btn-soft" onclick="toggleNonGroupV90('${esc(k.id_kegiatan)}')">${collapsed?'Lihat Rincian':'Minimize'}</button></div></div><div class="non-card-actions-v83">${honorAction}<span>${docs.length} dokumen diupload</span></div><div class="non-card-body-v83 ${collapsed?'hidden':''}">${bulk}${rows||'<p class="muted">Belum ada dokumen yang diupload.</p>'}<div class="doc-group-foot-v90"><b>Rekap:</b> ${docs.length} file dokumen. Validasi dapat dilakukan satu per satu atau sekaligus melalui pilihan centang.</div></div></article>`;
+  }).join('');
+  document.getElementById('contentArea').innerHTML=`${uploadSection}<section class="panel fade-up premium-panel"><div class="panel-title-row"><div><h3>Data Dokumen & Pencatatan Non Pengadaan</h3><p class="panel-sub">Mekanisme pemeriksaan, riwayat, perbaikan, dan validasi dibuat sama dengan Pencatatan Pengadaan.</p></div><button class="btn-refresh" onclick="refreshData()">Refresh</button></div><div class="filter-card"><div class="toolbar"><div class="field"><label>Search Nama Kegiatan</label><input value="${esc(filters.cairSearch||'')}" placeholder="Cari nama kegiatan..." oninput="filters.cairSearch=this.value;renderNonPengadaanV79()"></div></div></div><div class="non-list-v83">${cards||'<div class="empty-box">Belum ada kegiatan Non Pengadaan yang disetujui.</div>'}</div></section><div id="honorModalV79" class="modal-backdrop hidden"></div>`;
+};
+
+/* =========================================================
+   SIMPROV v91 - Penyempurnaan Verifikator & Non Pengadaan
+   ========================================================= */
+function normalizeVerifierHistoryV91(value){
+  return String(value||'')
+    .replace(/\(Admin\s*\/\s*Keuangan\)/gi,'(Verifikator)')
+    .replace(/\(Keuangan\)/gi,'(Verifikator)')
+    .replace(/Pemeriksaan Keuangan/gi,'Pemeriksaan Verifikator')
+    .replace(/oleh Keuangan/gi,'oleh Verifikator');
+}
+
+nonStatusSummaryV83=function(docs){
+  const required=['Tanda Terima','Bukti Potong Pajak'];
+  const latestByType={};
+  (docs||[]).forEach(d=>{ latestByType[String(d.jenis_dokumen||'').trim().toLowerCase()]=d; });
+  const matched=required.map(x=>latestByType[x.toLowerCase()]).filter(Boolean);
+  if(!matched.length) return 'BELUM ADA DOKUMEN';
+  if(matched.some(d=>isNonDocRepairV90(d))) return 'PERBAIKAN DOKUMEN';
+  if(matched.length<required.length) return 'DOKUMEN BELUM LENGKAP';
+  if(matched.every(d=>isNonDocValidV90(d))) return 'DOKUMEN VALID';
+  if(matched.some(d=>nonDocStatusV90(d).includes('PERBAIKAN'))) return 'MENUNGGU VERIFIKASI PERBAIKAN DOKUMEN';
+  return 'MENUNGGU VERIFIKASI DOKUMEN';
+};
+
+const __renderPlanningRowV91=renderPerencanaanRow;
+renderPerencanaanRow=function(k){
+  let html=__renderPlanningRowV91(k);
+  if(isNonKategoriV81(k) && !String(k.jenis_non_pengadaan||'').toLowerCase().includes('honor')){
+    html=html.replace(/<button[^>]*onclick="openHonorModalV79\('[^']+'\)"[^>]*>[\s\S]*?<\/button>/gi,
+      '<button class="btn-mini btn-disabled-v87" disabled>Upload Manual di Pencatatan Non Pengadaan</button>');
+    html=html.replace(/>Buat Dokumen<\/button>/gi,'>Upload Manual di Pencatatan Non Pengadaan</button>');
+  }
+  return html;
+};
+const __docsNonV91=docsNonV79;
+docsNonV79=function(id){
+  const allowed=new Set(['tanda terima','bukti potong pajak']);
+  return (__docsNonV91(id)||[]).filter(d=>allowed.has(String(d.jenis_dokumen||'').trim().toLowerCase()));
+};
+
+/* =========================================================
+   SIMPROV v92 - Honorarium revisi & detail kegiatan upload
+   ========================================================= */
+function honorTaxRateV92(category, manualValue=0){
+  const c=String(category||'').toUpperCase();
+  if(c==='INPUT MANUAL') return Number(manualValue||0);
+  return honorTaxRateV87(c);
+}
+function syncHonorTaxV92(selectEl){
+  const row=selectEl.closest('.honor-row-v92');
+  const input=row?.querySelector('.hpajak');
+  const manual=String(selectEl.value||'').toUpperCase()==='INPUT MANUAL';
+  if(input){
+    input.readOnly=!manual;
+    input.classList.toggle('manual-tax-v92',manual);
+    if(!manual) input.value=String(honorTaxRateV87(selectEl.value)).replace('.',',');
+    else { input.value=''; input.placeholder='Masukkan persen'; input.focus(); }
+  }
+}
+honorRowV79=function(){
+  return `<div class="honor-row-v92">
+    <div class="honor-row-main-v92">
+      <div class="field"><label>Nama Penerima</label><input class="hnama" placeholder="Nama lengkap" autocomplete="off"></div>
+      <div class="field"><label>NIK/NPWP (16 Digit)</label><input class="hnik" inputmode="numeric" maxlength="16" pattern="[0-9]{16}" placeholder="16 digit angka" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,16)"></div>
+      <div class="field"><label>Jabatan / Peran</label><input class="hperan" placeholder="Contoh: Narasumber"></div>
+      <div class="field field-small-v92"><label>Volume</label><input class="hvol" inputmode="numeric" value="1" placeholder="1"></div>
+    </div>
+    <div class="honor-row-main-v92 honor-row-second-v92">
+      <div class="field"><label>Satuan</label><input class="hsatuan" value="Orang/Kegiatan" placeholder="Contoh: Orang/Kegiatan"></div>
+      <div class="field"><label>Tarif Honor</label><input class="htarif" inputmode="numeric" placeholder="0" oninput="onAngkaInput(this)"></div>
+      <div class="field"><label>Kategori</label><select class="hkategori" onchange="syncHonorTaxV92(this)"><option value="NON ASN">Non-ASN / Bukan Pegawai</option><option value="ASN I-II">ASN Golongan I–II</option><option value="ASN III">ASN Golongan III</option><option value="ASN IV/PEJABAT">ASN Golongan IV / Pejabat Negara</option><option value="INPUT MANUAL">Input Pajak Manual</option></select></div>
+      <div class="field field-small-v92"><label>Tarif PPh 21 (%)</label><input class="hpajak" value="2,5" readonly inputmode="decimal"></div>
+      <div class="honor-remove-wrap"><button class="btn-red" type="button" onclick="this.closest('.honor-row-v92').remove()">Hapus</button></div>
+    </div>
+  </div>`;
+};
+openHonorModalV79=function(id){
+  const k=(dashboard.perencanaan||[]).find(x=>String(x.id_kegiatan)===String(id)); if(!k) return;
+  const docs=docsNonV79(id)||[];
+  if(docs.some(d=>d.url_file)){ alert('Dokumen kegiatan sudah diupload. Dokumen honorarium tidak dapat dibuat ulang.'); return; }
+  let m=document.getElementById('honorModalV79');
+  if(!m){m=document.createElement('div');m.id='honorModalV79';document.body.appendChild(m);}
+  m.className='modal-backdrop honor-backdrop-v87';
+  const latest=latestNonV79(id);
+  m.innerHTML=`<div class="modal-card honor-modal-v92 fade-up">
+    <div class="modal-head"><div><h3>Buat Dokumen Honorarium</h3><p>${esc(k.nama_kegiatan)} • ${esc(bidangName(k.id_bidang))}</p></div><button class="btn-soft" onclick="document.getElementById('honorModalV79').classList.add('hidden')">Tutup</button></div>
+    <input type="hidden" id="honorKegV79" value="${esc(id)}">
+    <div class="honor-modal-info-v81"><div><span>ID Kegiatan</span><b>${esc(k.id_kegiatan)}</b></div><div><span>Jenis</span><b>${esc(k.jenis_non_pengadaan||'Honorarium')}</b></div><div><span>Nilai Perencanaan</span><b>${rupiah(k.jumlah)}</b></div><div><span>Versi Selanjutnya</span><b>V${Number(latest?.versi_pdf||0)+1}</b></div></div>
+    <div class="honor-tax-note-v87"><b>Catatan:</b> tarif otomatis tersedia sesuai kategori. Pilih <b>Input Pajak Manual</b> apabila persentase pajak perlu ditentukan sendiri.</div>
+    <div class="honor-modal-body-v81"><div class="honor-head-row-v81"><span>Daftar Penerima Honorarium</span><button class="btn-soft" type="button" onclick="document.getElementById('honorRowsV79').insertAdjacentHTML('beforeend',honorRowV79())">+ Tambah Penerima</button></div><div id="honorRowsV79" class="honor-rows-v92">${honorRowV79()}</div></div>
+    <div class="modal-actions honor-actions-v81"><button class="btn-soft" onclick="document.getElementById('honorModalV79').classList.add('hidden')">Batal</button><button id="btnGenerateHonorV81" class="btn-green" onclick="generateHonorV79()">${latest?.url_pdf?'Buat Versi Baru':'Buat Dokumen Honorarium'}</button></div>
+  </div>`;
+};
+generateHonorV79=async function(){
+  const btn=document.getElementById('btnGenerateHonorV81'); if(btn?.dataset.busy==='1') return;
+  const id=document.getElementById('honorKegV79')?.value;
+  const rows=[...document.querySelectorAll('.honor-row-v92')], penerima=[];
+  for(let i=0;i<rows.length;i++){
+    const r=rows[i], nik=(r.querySelector('.hnik')?.value||'').replace(/\D/g,''), nama=r.querySelector('.hnama')?.value.trim()||'';
+    const volume=toNumber(r.querySelector('.hvol')?.value), tarif=toNumber(r.querySelector('.htarif')?.value), kategori=r.querySelector('.hkategori')?.value||'NON ASN';
+    const manual=String(kategori).toUpperCase()==='INPUT MANUAL';
+    const rate=honorTaxRateV92(kategori,toNumber(r.querySelector('.hpajak')?.value));
+    if(!nama){alert(`Nama penerima ke-${i+1} wajib diisi.`);return;}
+    if(!/^\d{16}$/.test(nik)){alert(`NIK/NPWP penerima ke-${i+1} wajib tepat 16 digit angka.`);return;}
+    if(!volume||!tarif){alert(`Volume dan tarif honor penerima ke-${i+1} wajib diisi.`);return;}
+    if(manual && (rate<0||rate>100)){alert(`Tarif pajak manual penerima ke-${i+1} harus antara 0 sampai 100%.`);return;}
+    penerima.push({nama_penerima:nama,nik_npwp:nik,jabatan_peran:r.querySelector('.hperan')?.value||'',volume,satuan:r.querySelector('.hsatuan')?.value||'Orang/Kegiatan',tarif_honor:tarif,kategori_pajak:kategori,jenis_pajak:manual?'PPh 21 MANUAL':'PPh 21 OTOMATIS',tarif_pajak:rate,nilai_pajak:0});
+  }
+  if(!penerima.length){alert('Minimal satu penerima honor wajib diisi.');return;}
+  if(btn){btn.dataset.busy='1';btn.disabled=true;btn.textContent='Memproses...';}
+  showLoading('Menyiapkan dokumen honorarium...');
+  try{
+    const res=await apiPost({action:'generateHonorPdf',user:currentUser,data:{id_kegiatan:id,penerima}});
+    alert(res.message||'Proses selesai');
+    if(res.success){document.getElementById('honorModalV79')?.classList.add('hidden');await loadDashboard(false);activeMenu='Non Pengadaan';renderAll();}
+  }catch(e){alert(e.message||e);}finally{hideLoading();if(btn){btn.dataset.busy='0';btn.disabled=false;btn.textContent='Buat Dokumen Honorarium';}}
+};
+
+function kegiatanDetailHtmlV92(k){
+  if(!k) return '';
+  return `<div class="selected-kegiatan-detail-v92"><div><span>ID Kegiatan</span><b>${esc(k.id_kegiatan||'-')}</b></div><div><span>Nama Kegiatan</span><b>${esc(k.nama_kegiatan||'-')}</b></div><div><span>Bidang</span><b>${esc(bidangName(k.id_bidang)||'-')}</b></div><div><span>Kategori/Jenis</span><b>${esc(isNonKategoriV81(k)?('Non Pengadaan • '+(k.jenis_non_pengadaan||'-')):(k.metode_pemilihan||'-'))}</b></div><div><span>Jumlah</span><b>${rupiah(k.jumlah||0)}</b></div><div><span>Waktu</span><b>${esc(formatTanggalID(k.waktu_pemilihan)||'-')}</b></div></div>`;
+}
+const __updateSaranV92=updateSaranDokumen;
+updateSaranDokumen=function(){
+  __updateSaranV92();
+  const id=document.getElementById('dokKegiatan')?.value;
+  const k=(dashboard.perencanaan||[]).find(x=>String(x.id_kegiatan)===String(id));
+  const box=document.getElementById('saranDokumen'); if(box) box.innerHTML=kegiatanDetailHtmlV92(k);
+};
+function updateNonKegiatanDetailV92(){
+  const id=document.getElementById('nonKegiatanV83')?.value;
+  const k=(dashboard.perencanaan||[]).find(x=>String(x.id_kegiatan)===String(id));
+  const box=document.getElementById('nonKegiatanDetailV92'); if(box) box.innerHTML=kegiatanDetailHtmlV92(k);
+}
+const __renderNonV92=renderNonPengadaanV79;
+renderNonPengadaanV79=function(){
+  __renderNonV92();
+  const sel=document.getElementById('nonKegiatanV83');
+  if(sel){
+    sel.setAttribute('onchange','updateNonKegiatanDetailV92()');
+    const fg=sel.closest('.form-grid');
+    if(fg && !document.getElementById('nonKegiatanDetailV92')) fg.insertAdjacentHTML('afterend','<div id="nonKegiatanDetailV92"></div>');
+    updateNonKegiatanDetailV92();
+  }
+  document.querySelectorAll('.non-card-v83').forEach(card=>{
+    const id=card.querySelector('small')?.textContent?.split('•')[0]?.trim();
+    const docs=id?docsNonV79(id):[];
+    const link=card.querySelector('a.btn-link-v79');
+    if(link && !docs.some(d=>d.url_file)){
+      const disabled=[...card.querySelectorAll('button')].find(b=>/Dokumen Sudah Dibuat/i.test(b.textContent||''));
+      if(disabled){disabled.disabled=false;disabled.classList.remove('btn-disabled-v87');disabled.textContent='Buat Versi Baru';disabled.setAttribute('onclick',`openHonorModalV79('${esc(id)}')`);}
+    }
+  });
+};
+const __renderPlanningV92=renderPerencanaanRow;
+renderPerencanaanRow=function(k){
+  let html=__renderPlanningV92(k);
+  if(isNonKategoriV81(k) && String(k.jenis_non_pengadaan||'').toLowerCase().includes('honor')){
+    const docs=docsNonV79(k.id_kegiatan)||[], latest=latestNonV79(k.id_kegiatan);
+    if(latest?.url_pdf && !docs.some(d=>d.url_file)) html=html.replace(/<button[^>]*disabled[^>]*>Dokumen Sudah Dibuat<\/button>/i,`<button class="btn-mini btn-green" onclick="openHonorModalV79('${esc(k.id_kegiatan)}')">Buat Versi Baru</button>`);
+  }
+  return html;
+};
+
+/* =========================================================
+   SIMPROV v93 - Laporan Non Pengadaan, Hak Akses Honor,
+   Pembuatan Versi, dan Upload Langsung pada Rincian
+   ========================================================= */
+function canCreateHonorV93(){
+  return !!currentUser && !isAdmin() && !isVerifierV77() && !isReviewer();
+}
+
+/* Pastikan modal versi baru hanya bisa dibuka oleh User Bidang dan
+   tetap dapat dibuat selama belum ada dokumen pendukung yang diunggah. */
+const __openHonorModalV93Base = openHonorModalV79;
+openHonorModalV79 = function(id){
+  if(!canCreateHonorV93()){
+    alert('Pembuatan dokumen honorarium hanya dapat dilakukan oleh User Bidang.');
+    return;
+  }
+  const docs=(docsNonV79(id)||[]).filter(d=>String(d.url_file||'').trim());
+  if(docs.length){
+    alert('Dokumen kegiatan sudah diupload. Dokumen honorarium tidak dapat dibuat ulang.');
+    return;
+  }
+  return __openHonorModalV93Base(id);
+};
+
+/* Override terakhir untuk menghindari penguncian lama hanya karena PDF V1 telah dibuat. */
+const __generateHonorV93Base = generateHonorV79;
+generateHonorV79 = async function(){
+  if(!canCreateHonorV93()){
+    alert('Pembuatan dokumen honorarium hanya dapat dilakukan oleh User Bidang.');
+    return;
+  }
+  const id=document.getElementById('honorKegV79')?.value;
+  const docs=(docsNonV79(id)||[]).filter(d=>String(d.url_file||'').trim());
+  if(docs.length){
+    alert('Dokumen kegiatan sudah diupload. Dokumen honorarium tidak dapat dibuat ulang.');
+    return;
+  }
+  return __generateHonorV93Base();
+};
+
+function allowedNonDocsV93(){ return ['Tanda Terima','Bukti Potong Pajak']; }
+function missingNonDocsV93(id){
+  const existing=new Set((docsNonV79(id)||[]).filter(d=>String(d.url_file||'').trim()).map(d=>String(d.jenis_dokumen||'').trim().toLowerCase()));
+  return allowedNonDocsV93().filter(j=>!existing.has(j.toLowerCase()));
+}
+async function uploadInlineNonV93(id,jenis){
+  if(!canCreateHonorV93()) return;
+  const input=document.getElementById(`inlineNonFileV93_${CSS.escape(String(id))}_${jenis==='Tanda Terima'?'tt':'bp'}`);
+  const file=input?.files?.[0];
+  if(!file){alert(`Pilih file ${jenis} terlebih dahulu.`);return;}
+  showLoading(`Mengupload ${jenis}...`);
+  try{
+    const b64=await fileToBase64(file);
+    const r=await apiPost({action:'uploadDokumenNonPengadaan',user:currentUser,id_kegiatan:id,jenis_dokumen:jenis,file_name:file.name,mime_type:file.type,file_base64:b64});
+    alert(r.message||'Proses selesai');
+    if(r.success){await loadDashboard(false);activeMenu='Non Pengadaan';renderAll();}
+  }catch(e){alert(e.message||e);}finally{hideLoading();}
+}
+function inlineNonUploadHtmlV93(k){
+  if(!canCreateHonorV93()) return '';
+  const missing=missingNonDocsV93(k.id_kegiatan);
+  if(!missing.length) return '<div class="inline-non-complete-v93">Seluruh dokumen wajib sudah diupload.</div>';
+  return `<div class="inline-non-upload-v93"><div class="inline-non-title-v93"><b>Upload Dokumen yang Belum Tersedia</b><span>${missing.length} dokumen belum diupload</span></div>${missing.map(j=>{const key=j==='Tanda Terima'?'tt':'bp';return `<div class="inline-non-row-v93"><div><b>${esc(j)}</b><small>PDF/JPG/PNG sesuai dokumen asli</small></div><input type="file" id="inlineNonFileV93_${esc(k.id_kegiatan)}_${key}" accept=".pdf,.jpg,.jpeg,.png"><button class="btn-mini btn-upload-ulang" onclick="uploadInlineNonV93('${esc(k.id_kegiatan)}','${esc(j)}')">Upload</button></div>`}).join('')}</div>`;
+}
+
+const __renderNonV93Base = renderNonPengadaanV79;
+renderNonPengadaanV79 = function(){
+  __renderNonV93Base();
+  const list=(dashboard.perencanaan||[]).filter(k=>isNonKategoriV81(k));
+  document.querySelectorAll('.non-card-v83').forEach(card=>{
+    const id=(card.querySelector('small')?.textContent||'').split('•')[0].trim();
+    const k=list.find(x=>String(x.id_kegiatan)===String(id));
+    if(!k) return;
+    /* Admin/Verifikator hanya memeriksa, tidak membuat dokumen. */
+    if(!canCreateHonorV93()){
+      card.querySelectorAll('button').forEach(btn=>{
+        if(/Buat Dokumen Honorarium|Buat Versi Baru/i.test(btn.textContent||'')) btn.remove();
+      });
+    }
+    const body=card.querySelector('.non-card-body-v83');
+    if(body && !body.querySelector('.inline-non-upload-v93,.inline-non-complete-v93')){
+      body.insertAdjacentHTML('beforeend',inlineNonUploadHtmlV93(k));
+    }
+  });
+};
+
+/* Tombol pada tabel Perencanaan hanya untuk User Bidang. */
+const __renderPlanningV93Base=renderPerencanaanRow;
+renderPerencanaanRow=function(k){
+  let html=__renderPlanningV93Base(k);
+  if((isAdmin()||isVerifierV77()||isReviewer()) && isNonKategoriV81(k)){
+    html=html.replace(/<button[^>]*onclick="openHonorModalV79\('[^']+'\)"[^>]*>[^<]*<\/button>/gi,'<span class="muted">-</span>');
+  }
+  return html;
+};
+
+/* Laporan monitoring: tambahkan rekap Non Pengadaan dan dokumennya. */
+const __buildMonitoringReportV93Base=buildMonitoringReportBodyV55;
+buildMonitoringReportBodyV55=function(semuaBidang){
+  let html=__buildMonitoringReportV93Base(semuaBidang);
+  const userBidang=String(currentUser?.id_bidang||'');
+  const plans=(dashboard.perencanaan||[]).filter(k=>isNonKategoriV81(k) && (semuaBidang||String(k.id_bidang)===userBidang));
+  const docs=(dashboard.dokumenNonPengadaan||[]).filter(d=>semuaBidang||String(d.id_bidang)===userBidang);
+  const latestRows=dashboard.nonPengadaan||[];
+  const rows=plans.map((k,i)=>{
+    const kd=docs.filter(d=>String(d.id_kegiatan)===String(k.id_kegiatan));
+    const valid=kd.filter(d=>String(d.status_verifikasi||'').toUpperCase()==='VALID DOKUMEN').length;
+    const latest=latestRows.filter(n=>String(n.id_kegiatan)===String(k.id_kegiatan)).sort((a,b)=>toNumber(b.versi_pdf)-toNumber(a.versi_pdf))[0];
+    const detail=allowedNonDocsV93().map(j=>{
+      const d=kd.find(x=>String(x.jenis_dokumen||'').toLowerCase()===j.toLowerCase());
+      return `<div><b>${plainText(j)}</b>: ${d?`${plainText(displayStatusText(d.status_verifikasi||'-'))}${d.url_file?` - <a href="${esc(d.url_file)}" target="_blank">Buka File</a>`:''}`:'BELUM DIUPLOAD'}</div>`;
+    }).join('');
+    return `<tr><td>${i+1}</td><td>${plainText(k.id_kegiatan)}</td><td>${plainText(bidangName(k.id_bidang))}</td><td>${plainText(k.nama_kegiatan)}</td><td>${plainText(k.jenis_non_pengadaan||'-')}</td><td>${rupiah(k.jumlah||0)}</td><td>${latest?.url_pdf?`V${plainText(latest.versi_pdf||1)} - <a href="${esc(latest.url_pdf)}" target="_blank">Buka Dokumen Honor</a>`:'-'}</td><td>${valid}/2 valid</td><td>${detail}</td></tr>`;
+  }).join('');
+  const section=`<h3>4. Rekap Kegiatan dan Dokumen Non Pengadaan</h3><table><thead><tr><th>No</th><th>ID Kegiatan</th><th>Bidang</th><th>Nama Kegiatan</th><th>Jenis</th><th>Jumlah</th><th>Dokumen Honor</th><th>Dokumen Valid</th><th>Rincian Dokumen</th></tr></thead><tbody>${rows||'<tr><td colspan="9">Belum ada kegiatan Non Pengadaan</td></tr>'}</tbody></table>`;
+  return html+section;
+};
+
+/* =========================================================
+   SIMPROV v94 - Standar Biaya, Penyedia, dan Realisasi
+   ========================================================= */
+function isUserBidangV94(){ return !isAdmin() && !isReviewer() && !isPBJVerifierV65() && !isKeuangan(); }
+function standarRowsV94(){ return Array.isArray(dashboard?.standarBiaya) ? dashboard.standarBiaya : []; }
+function metodeBySkV94(jumlah, jenis='Barang', cara='Penyedia'){
+  const n=toNumber(jumlah), j=String(jenis||'').toUpperCase(), c=String(cara||'').toUpperCase();
+  if(c==='SWAKELOLA') return 'Swakelola';
+  if(j==='JASA KONSULTANSI') return n<=250000000 ? 'Seleksi Langsung' : 'Seleksi Langsung - Surat Perjanjian';
+  if(n<=500000000) return 'Belanja Langsung';
+  if(n<=1000000000) return 'Pengadaan Langsung';
+  return 'Pengadaan Langsung - Surat Perjanjian';
+}
+const __renderMenuV94Base=renderMenu;
+renderMenu=function(){
+  let menus;
+  if(isKeuangan()) menus=['Dashboard Monitoring','Pencatatan Pengadaan','Pencatatan Non Pengadaan','Penyedia & Realisasi','Standar Biaya','Laporan'];
+  else if(isAdmin()) menus=['Dashboard Monitoring','Struktur Anggaran','Perencanaan','Pencatatan Pengadaan','Pencatatan Non Pengadaan','Penyedia & Realisasi','Standar Biaya','Manajemen Akun','Laporan'];
+  else if(isReviewer() || isPBJVerifierV65()) menus=['Dashboard Monitoring','Struktur Anggaran','Perencanaan','Pencatatan Pengadaan','Pencatatan Non Pengadaan','Penyedia & Realisasi','Standar Biaya','Laporan'];
+  else menus=['Struktur Anggaran','Perencanaan','Pencatatan Pengadaan','Pencatatan Non Pengadaan','Penyedia & Realisasi','Standar Biaya','Laporan'];
+  document.getElementById('menuNav').innerHTML=menus.map(m=>`<button class="${activeMenu===m?'active':''}" onclick="setMenu('${m}')">${m}</button>`).join('');
+};
+const __renderContentV94Base=renderContent;
+renderContent=function(){
+  if(activeMenu==='Standar Biaya') return renderStandarBiayaV94();
+  if(activeMenu==='Penyedia & Realisasi') return renderPenyediaRealisasiV94();
+  return __renderContentV94Base();
+};
+function renderStandarBiayaV94(){
+  const rows=standarRowsV94();
+  const groups=[...new Set(rows.map(r=>r.kelompok).filter(Boolean))];
+  const filter=`<div class="filter-card"><div class="toolbar"><div class="field"><label>Cari Standar Biaya</label><input id="stdSearchV94" placeholder="Cari kelompok atau jenis biaya..." oninput="filterStandarV94()"></div><div class="field small"><label>Kelompok</label><select id="stdGroupV94" onchange="filterStandarV94()"><option value="ALL">Semua Kelompok</option>${groups.map(g=>`<option>${esc(g)}</option>`).join('')}</select></div>${isAdmin()?`<button class="btn-green" onclick="setupStandarV94()">Setup dari SK 2026</button>`:''}</div></div>`;
+  document.getElementById('contentArea').innerHTML=`<section class="panel fade-up"><div class="panel-title-row"><div><h3>Master Standar Biaya Porprov 2026</h3><p class="panel-sub">Referensi dari SK Nomor 040.2/KONI.Kt.Bgr/SK/II/2026. Nilai batas tertinggi tidak boleh dilampaui.</p></div><span class="badge status-approved">${rows.length} item</span></div>${filter}<div class="table-wrap"><table id="stdTableV94"><thead><tr><th>Kode</th><th>Kelompok</th><th>Jenis Biaya</th><th>Kategori</th><th>Jenis Pengadaan</th><th>Satuan</th><th>Besaran</th><th>Sifat</th></tr></thead><tbody>${rows.map(r=>standarRowV94(r)).join('')||'<tr><td colspan="8" class="empty">Master belum dibuat. Admin klik Setup dari SK 2026.</td></tr>'}</tbody></table></div></section>`;
+}
+function standarRowV94(r){ return `<tr data-search="${esc((r.kelompok+' '+r.jenis_biaya).toLowerCase())}" data-group="${esc(r.kelompok)}"><td>${esc(r.kode_kelompok)}</td><td>${esc(r.kelompok)}</td><td><b>${esc(r.jenis_biaya)}</b></td><td>${esc(r.kategori_anggaran)}</td><td>${esc(r.jenis_pengadaan||'-')}</td><td>${esc(r.satuan)}</td><td>${String(r.besaran).toUpperCase()==='AT COST'?'<b>At Cost</b>':rupiah(r.besaran)}</td><td>${badge(r.sifat_standar)}</td></tr>`; }
+function filterStandarV94(){ const q=(document.getElementById('stdSearchV94')?.value||'').toLowerCase(), g=document.getElementById('stdGroupV94')?.value||'ALL'; document.querySelectorAll('#stdTableV94 tbody tr').forEach(tr=>{tr.style.display=((!q||tr.dataset.search?.includes(q))&&(g==='ALL'||tr.dataset.group===g))?'':'none';}); }
+async function setupStandarV94(){ showLoading('Membuat Master Standar Biaya dari SK...'); try{const r=await apiPost({action:'setupStandarBiaya',user:currentUser}); alert(r.message); if(r.success) await refreshData();}finally{hideLoading();} }
+
+const __renderPerencanaanV94Base=renderPerencanaan;
+renderPerencanaan=function(){
+  __renderPerencanaanV94Base();
+  if(!isUserBidangV94()) return;
+  const body=document.querySelector('#contentArea .collapsible-panel .collapse-body');
+  if(!body || document.getElementById('standarBiayaV94')) return;
+  const rows=standarRowsV94();
+  const box=document.createElement('div'); box.className='v94-planning-reference';
+  box.innerHTML=`<div class="v94-section-title">Klasifikasi dan Referensi Biaya</div><div class="form-grid">
+    <div class="field"><label>Sumber Harga</label><select id="sumberHargaV94" onchange="toggleStandarV94()"><option value="STANDAR">Gunakan Standar Biaya SK 2026</option><option value="MANUAL">Input Manual / Harga Pasar</option></select></div>
+    <div class="field"><label>Standar Biaya</label><select id="standarBiayaV94" onchange="applyStandarV94()"><option value="">Pilih standar biaya...</option>${rows.map(r=>`<option value="${esc(r.id_standar)}">[${esc(r.kode_kelompok)}] ${esc(r.kelompok)} — ${esc(r.jenis_biaya)} (${String(r.besaran).toUpperCase()==='AT COST'?'At Cost':rupiah(r.besaran)})</option>`).join('')}</select></div>
+    <div class="field"><label>Jenis Pengadaan</label><select id="jenisPengadaanV94" onchange="updateMethodV94()"><option>Barang</option><option>Jasa Lainnya</option><option>Jasa Konsultansi</option><option>Konstruksi</option></select></div>
+    <div class="field"><label>Cara Pelaksanaan</label><select id="caraPelaksanaanV94" onchange="updateMethodV94()"><option>Penyedia</option><option>Swakelola</option></select></div>
+  </div><div id="stdInfoV94" class="doc-help-box">Pilih standar biaya agar satuan, harga, kategori, dan klasifikasi terisi otomatis.</div>`;
+  body.insertBefore(box,body.firstChild);
+  updateMethodV94();
+};
+function toggleStandarV94(){ const manual=document.getElementById('sumberHargaV94')?.value==='MANUAL'; const s=document.getElementById('standarBiayaV94'); if(s){s.disabled=manual;if(manual)s.value='';} document.getElementById('harga')?.removeAttribute('readonly'); }
+function applyStandarV94(){
+  const id=document.getElementById('standarBiayaV94')?.value, r=standarRowsV94().find(x=>String(x.id_standar)===String(id)); if(!r)return;
+  const kat=document.getElementById('kategoriPerencanaanV79'); if(kat){kat.value=r.kategori_anggaran; toggleKategoriV79();}
+  const satuan=document.getElementById('satuan'); if(satuan)satuan.value=r.satuan||'';
+  const harga=document.getElementById('harga'); if(harga && String(r.besaran).toUpperCase()!=='AT COST'){harga.value=Number(r.besaran).toLocaleString('id-ID'); onAngkaInput(harga);}
+  const jp=document.getElementById('jenisPengadaanV94'); if(jp && r.jenis_pengadaan)jp.value=r.jenis_pengadaan;
+  const jenisNon=document.getElementById('jenisNonPengadaanV79'); if(jenisNon && r.kategori_anggaran==='NON PENGADAAN'){ const map=String(r.kelompok).toLowerCase(); jenisNon.value=map.includes('honor')?'Honorarium':map.includes('perjalanan')?'Perjalanan Dinas':map.includes('uang saku')?'Uang Saku':'Belanja Non Pengadaan Lainnya'; }
+  document.getElementById('stdInfoV94').innerHTML=`<b>${esc(r.jenis_biaya)}</b> • ${esc(r.satuan)} • ${String(r.besaran).toUpperCase()==='AT COST'?'At Cost':rupiah(r.besaran)} • ${esc(r.sifat_standar)}<br><small>${esc(r.sumber_dasar)}</small>`;
+  updateMethodV94();
+}
+function updateMethodV94(){
+  const kat=document.getElementById('kategoriPerencanaanV79')?.value||'PENGADAAN';
+  const non=kat==='NON PENGADAAN';
+  ['jenisPengadaanV94','caraPelaksanaanV94'].forEach(id=>document.getElementById(id)?.closest('.field')?.classList.toggle('hidden',non));
+  const total=toNumber(document.getElementById('volume')?.value)*toNumber(document.getElementById('harga')?.value);
+  const metode=non?'':metodeBySkV94(total,document.getElementById('jenisPengadaanV94')?.value,document.getElementById('caraPelaksanaanV94')?.value);
+  const el=document.getElementById('metodePemilihan'); if(el)el.value=metode;
+}
+const __onAngkaV94Base=onAngkaInput;
+onAngkaInput=function(){ const r=__onAngkaV94Base.apply(this,arguments); updateMethodV94(); return r; };
+savePerencanaan=async function(){
+  const kategori=document.getElementById('kategoriPerencanaanV79')?.value||'PENGADAAN';
+  const data={nama_kegiatan:document.getElementById('namaKegiatan')?.value||'',keterangan:document.getElementById('keterangan')?.value||'',volume:toNumber(document.getElementById('volume')?.value),satuan:document.getElementById('satuan')?.value||'',harga_satuan:toNumber(document.getElementById('harga')?.value),waktu_pemilihan:document.getElementById('waktuPemilihan')?.value||'',kategori,jenis_non_pengadaan:document.getElementById('jenisNonPengadaanV79')?.value||'',jenis_pengadaan:document.getElementById('jenisPengadaanV94')?.value||'',cara_pelaksanaan:document.getElementById('caraPelaksanaanV94')?.value||'',id_standar_biaya:document.getElementById('standarBiayaV94')?.value||''};
+  showLoading('Mengajukan perencanaan...'); try{const r=await apiPost({action:'savePerencanaanV94',user:currentUser,data}); alert(r.message); if(r.success){await loadDashboard(false);renderAll();}}finally{hideLoading();}
+};
+
+function procurementActivitiesV94(){ return (dashboard?.perencanaan||[]).filter(k=>String(k.kategori||'PENGADAAN').toUpperCase()!=='NON PENGADAAN'&&String(k.status_perencanaan||'').toUpperCase()==='DISETUJUI'); }
+function renderPenyediaRealisasiV94(){
+  const acts=procurementActivitiesV94(), providers=dashboard?.penyedia||[], picks=dashboard?.pemilihanPenyedia||[], reals=dashboard?.realisasi||[];
+  document.getElementById('contentArea').innerHTML=`<section class="panel fade-up"><div class="panel-title-row"><div><h3>Penyedia dan Realisasi</h3><p class="panel-sub">Alur seperti SPSE internal: daftarkan penyedia, tetapkan penyedia per kegiatan, lalu catat nilai realisasi sebenarnya.</p></div></div>
+  <div class="v94-process-flow"><span>1. Perencanaan Disetujui</span><b>→</b><span>2. Input Penyedia</span><b>→</b><span>3. Penetapan Penyedia</span><b>→</b><span>4. Dokumen</span><b>→</b><span>5. Realisasi</span></div>
+  ${isUserBidangV94()||isAdmin()?providerFormV94():''}${providerSelectFormV94(acts,providers)}${realisasiFormV94(acts)}
+  <h4 style="margin-top:24px">Rekap Penetapan Penyedia</h4><div class="table-wrap"><table><thead><tr><th>Kegiatan</th><th>Penyedia</th><th>Penawaran</th><th>Negosiasi</th><th>Kontrak</th><th>Nomor/Tanggal</th><th>Status</th></tr></thead><tbody>${picks.map(x=>`<tr><td>${esc(kegiatanName(x.id_kegiatan))}<br><small>${esc(x.id_kegiatan)}</small></td><td><b>${esc(x.nama_penyedia_snapshot)}</b></td><td>${rupiah(x.nilai_penawaran)}</td><td>${rupiah(x.nilai_negosiasi)}</td><td><b>${rupiah(x.nilai_kontrak)}</b></td><td>${esc(x.nomor_kontrak||'-')}<br>${esc(formatTanggalID(x.tanggal_kontrak))}</td><td>${badge(x.status_pemilihan)}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">Belum ada penetapan penyedia</td></tr>'}</tbody></table></div>
+  <h4 style="margin-top:24px">Rekap Realisasi</h4><div class="table-wrap"><table><thead><tr><th>Kegiatan</th><th>Perencanaan</th><th>Realisasi</th><th>Sisa</th><th>Tanggal</th><th>Nomor Bukti</th><th>Status</th></tr></thead><tbody>${reals.map(x=>`<tr><td>${esc(kegiatanName(x.id_kegiatan))}</td><td>${rupiah(x.nilai_perencanaan)}</td><td><b>${rupiah(x.nilai_realisasi)}</b></td><td>${rupiah(toNumber(x.nilai_perencanaan)-toNumber(x.nilai_realisasi))}</td><td>${esc(formatTanggalID(x.tanggal_realisasi))}</td><td>${esc(x.nomor_bukti||'-')}</td><td>${badge(x.status)}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">Belum ada realisasi</td></tr>'}</tbody></table></div></section>`;
+}
+function activityOptionsV94(acts){ return `<option value="">Pilih kegiatan...</option>`+acts.map(k=>`<option value="${esc(k.id_kegiatan)}">${esc(k.nama_kegiatan)} — ${rupiah(k.jumlah)} — ${esc(k.metode_pemilihan)}</option>`).join(''); }
+function providerFormV94(){ return `<div class="v94-form-card"><h4>Daftarkan Penyedia</h4><div class="form-grid"><div class="field"><label>Nama Penyedia</label><input id="pNamaV94"></div><div class="field"><label>Bentuk Usaha</label><select id="pBentukV94"><option>Perorangan</option><option>CV</option><option>PT</option><option>Koperasi</option><option>Toko</option></select></div><div class="field"><label>NIK/NPWP</label><input id="pNpwpV94"></div><div class="field"><label>Alamat</label><input id="pAlamatV94"></div><div class="field"><label>Telepon</label><input id="pTelpV94"></div><div class="field"><label>Email</label><input id="pEmailV94"></div><div class="field"><label>Nama Pimpinan</label><input id="pPimpinanV94"></div><div class="field"><label>Bank / Nomor Rekening</label><input id="pBankV94" placeholder="Bank - nomor rekening - atas nama"></div></div><button class="btn-green" onclick="saveProviderV94()">Simpan Penyedia</button></div>`; }
+function providerSelectFormV94(acts,providers){ return `<div class="v94-form-card"><h4>Penetapan Penyedia Kegiatan</h4><div class="form-grid"><div class="field"><label>Kegiatan</label><select id="pickKegV94">${activityOptionsV94(acts)}</select></div><div class="field"><label>Penyedia</label><select id="pickProviderV94"><option value="">Pilih penyedia...</option>${providers.map(p=>`<option value="${esc(p.id_penyedia)}">${esc(p.nama_penyedia)} — ${esc(p.nik_npwp)}</option>`).join('')}</select></div><div class="field"><label>Nilai Penawaran</label><input id="pickOfferV94" inputmode="numeric" oninput="formatAngkaInput(this)"></div><div class="field"><label>Nilai Negosiasi</label><input id="pickNegoV94" inputmode="numeric" oninput="formatAngkaInput(this)"></div><div class="field"><label>Nilai Kontrak</label><input id="pickContractV94" inputmode="numeric" oninput="formatAngkaInput(this)"></div><div class="field"><label>Nomor Kontrak/SPK/Kuitansi</label><input id="pickNoV94"></div><div class="field"><label>Tanggal Kontrak</label><input type="date" id="pickDateV94"></div><div class="field"><label>Catatan</label><input id="pickNoteV94"></div></div><button class="btn-green" onclick="savePickV94()">Tetapkan Penyedia</button></div>`; }
+function realisasiFormV94(acts){ return `<div class="v94-form-card"><h4>Input Nilai Realisasi</h4><div class="form-grid"><div class="field"><label>Kegiatan</label><select id="relKegV94">${activityOptionsV94(acts)}</select></div><div class="field"><label>Nilai Realisasi</label><input id="relNilaiV94" inputmode="numeric" oninput="formatAngkaInput(this)"></div><div class="field"><label>Tanggal Realisasi</label><input id="relDateV94" type="date"></div><div class="field"><label>Nomor Bukti/Invoice</label><input id="relNoV94"></div><div class="field"><label>Keterangan</label><input id="relKetV94"></div></div><button class="btn-green" onclick="saveRealV94()">Simpan Realisasi</button></div>`; }
+async function saveProviderV94(){ const bank=(document.getElementById('pBankV94')?.value||'').split('-'); const data={nama_penyedia:document.getElementById('pNamaV94').value,bentuk_usaha:document.getElementById('pBentukV94').value,nik_npwp:document.getElementById('pNpwpV94').value,alamat:document.getElementById('pAlamatV94').value,telepon:document.getElementById('pTelpV94').value,email:document.getElementById('pEmailV94').value,nama_pimpinan:document.getElementById('pPimpinanV94').value,nama_bank:bank[0]||'',nomor_rekening:bank[1]||'',atas_nama_rekening:bank.slice(2).join('-')}; showLoading('Menyimpan penyedia...');try{const r=await apiPost({action:'savePenyedia',user:currentUser,data});alert(r.message);if(r.success)await refreshData();}finally{hideLoading();} }
+async function savePickV94(){ const data={id_kegiatan:document.getElementById('pickKegV94').value,id_penyedia:document.getElementById('pickProviderV94').value,nilai_penawaran:toNumber(document.getElementById('pickOfferV94').value),nilai_negosiasi:toNumber(document.getElementById('pickNegoV94').value),nilai_kontrak:toNumber(document.getElementById('pickContractV94').value),nomor_kontrak:document.getElementById('pickNoV94').value,tanggal_kontrak:document.getElementById('pickDateV94').value,catatan:document.getElementById('pickNoteV94').value};showLoading('Menetapkan penyedia...');try{const r=await apiPost({action:'savePemilihanPenyedia',user:currentUser,data});alert(r.message);if(r.success)await refreshData();}finally{hideLoading();} }
+async function saveRealV94(){ const data={id_kegiatan:document.getElementById('relKegV94').value,nilai_realisasi:toNumber(document.getElementById('relNilaiV94').value),tanggal_realisasi:document.getElementById('relDateV94').value,nomor_bukti:document.getElementById('relNoV94').value,keterangan:document.getElementById('relKetV94').value};showLoading('Menyimpan nilai realisasi...');try{const r=await apiPost({action:'saveRealisasiV94',user:currentUser,data});alert(r.message);if(r.success)await refreshData();}finally{hideLoading();} }
