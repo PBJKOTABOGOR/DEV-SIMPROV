@@ -2488,6 +2488,70 @@ tr:has(.per-file-revision) td{
 .inline-non-complete-v93{margin:14px 12px 4px;padding:12px;border-radius:12px;background:#ebfff1;border:1px solid #bdebc9;color:#16743a;font-weight:700}
 @media(max-width:760px){.inline-non-row-v93{grid-template-columns:1fr}.inline-non-title-v93{align-items:flex-start;flex-direction:column}}
 
-/* SIMPROV v96 - hanya style fitur Penyedia & Realisasi */
-.process-grid-v96{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:16px 0}.process-grid-v96 .field{margin:0}.process-grid-v96 textarea{min-height:96px;resize:vertical}.span-2-v96{grid-column:span 2}.template-panel-v96{margin-top:18px;padding:16px;border:1px solid #dbe8f3;border-radius:16px;background:#f8fbfe}.template-buttons-v96{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.generated-list-v96{display:flex;flex-wrap:wrap;gap:10px}.generated-list-v96 a{padding:8px 11px;border-radius:10px;background:#e8f4ff;color:#075b91;font-weight:700;text-decoration:none}
-@media(max-width:900px){.process-grid-v96{grid-template-columns:1fr 1fr}.span-2-v96{grid-column:span 2}}@media(max-width:640px){.process-grid-v96{grid-template-columns:1fr}.span-2-v96{grid-column:span 1}.template-buttons-v96{flex-direction:column}.template-buttons-v96 button{width:100%}}
+/* ===== SIMPROV v94 - Pipeline Pengadaan Langsung, Master Penyedia, Pencatatan BL ===== */
+.pl-stepper-v94{display:flex;align-items:flex-start;gap:0;margin:14px 4px 18px;overflow-x:auto;padding-bottom:6px}
+.pl-step-v94{display:flex;flex-direction:column;align-items:center;min-width:96px;text-align:center;gap:6px}
+.pl-step-dot-v94{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;background:#eef2f7;color:#8592a6;border:2px solid #d7e0ec}
+.pl-step-v94.done .pl-step-dot-v94{background:#16a34a;color:#fff;border-color:#16a34a}
+.pl-step-v94.next .pl-step-dot-v94{background:#fff;color:#1d6fd1;border-color:#1d6fd1;box-shadow:0 0 0 4px rgba(29,111,209,.14)}
+.pl-step-v94.proses .pl-step-dot-v94{background:#f59e0b;color:#fff;border-color:#f59e0b}
+.pl-step-name-v94{font-size:11px;font-weight:700;color:#64748b;line-height:1.25}
+.pl-step-v94.done .pl-step-name-v94{color:#166534}
+.pl-step-v94.next .pl-step-name-v94{color:#1d6fd1}
+.pl-step-line-v94{flex:1;min-width:18px;height:2px;background:#d7e0ec;margin-top:16px}
+.pl-tahap-v94{border:1px solid #e2e9f2;border-radius:12px;margin:8px 0;background:#fff;overflow:hidden}
+.pl-tahap-v94.done{background:#f6fdf8;border-color:#c9ecd4}
+.pl-tahap-v94>summary{cursor:pointer;padding:11px 14px;font-weight:700;display:flex;align-items:center;gap:8px;list-style:none}
+.pl-tahap-v94>summary::-webkit-details-marker{display:none}
+.pl-tahap-no-v94{background:#eef4ff;color:#1d6fd1;border-radius:8px;padding:2px 8px;font-size:12px;font-weight:800}
+.pl-tahap-v94.done .pl-tahap-no-v94{background:#dcf5e4;color:#166534}
+.pl-tahap-status-v94{margin-left:auto;font-size:11px;font-weight:800;color:#94a3b8;background:#f1f5f9;border-radius:999px;padding:3px 10px}
+.pl-tahap-status-v94.ok{color:#166534;background:#dcf5e4}
+.pl-tahap-body-v94{padding:4px 14px 14px;border-top:1px dashed #e2e9f2}
+.pl-info-v94{margin:8px 0;font-size:13px;color:#334155;background:#f8fafc;border-radius:10px;padding:8px 10px}
+.pl-dok-row-v94{padding:5px 0;font-size:13px;color:#334155;border-bottom:1px dotted #eef2f7}
+.pl-dok-row-v94:last-of-type{border-bottom:0}
+.pl-dok-chip-v94{display:inline-block;min-width:88px;text-align:center;font-size:10px;font-weight:800;border-radius:999px;padding:3px 8px;margin-right:6px;background:#fee2e2;color:#b91c1c}
+.pl-dok-chip-v94.ok{background:#dcf5e4;color:#166534}
+.pl-dok-chip-v94.wait{background:#fef3c7;color:#92400e}
+.pl-upload-v94{margin-top:10px;background:#f8fafc;border:1px solid #e2e9f2;border-radius:10px;padding:10px}
+.pl-upload-row-v94{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px}
+.pl-upload-row-v94 select,.pl-upload-row-v94 input[type=file]{padding:8px;border:1px solid #d7e4ef;border-radius:10px;background:#fff}
+.pl-form-v94{margin-top:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;background:#f5f9ff;border:1px solid #dbe8fb;border-radius:12px;padding:12px}
+.pl-form-v94 button{grid-column:1/-1;justify-self:start}
+.pl-form-v94 button[disabled]{opacity:.55;cursor:not-allowed}
+.pl-buka-v94{margin-top:10px}
+.pl-progress-v94{font-size:12px;font-weight:800;background:#eef4ff;color:#1d6fd1;border-radius:999px;padding:5px 12px;white-space:nowrap}
+.pl-progress-v94.ok{background:#dcf5e4;color:#166534}
+.bl-catat-v94{border-left:4px solid #16a34a}
+@media(max-width:760px){.pl-step-v94{min-width:76px}.pl-form-v94{grid-template-columns:1fr}}
+
+/* ===== SIMPROV v95 - List Paket ala SPSE + Standar Biaya ===== */
+.paket-table-v95 th{white-space:nowrap}
+.paket-row-v95 td{vertical-align:middle}
+.paket-link-v95{font-weight:700;color:#1d6fd1;text-decoration:none}
+.paket-link-v95:hover{text-decoration:underline}
+.paket-badge-v95{display:inline-block;font-size:10px;font-weight:800;border-radius:5px;padding:2px 7px;margin-left:4px;vertical-align:middle;background:#eef2f7;color:#475569;border:1px solid #d7e0ec}
+.paket-badge-v95.bl{background:#dcf5e4;color:#166534;border-color:#bdebc9}
+.paket-badge-v95.pl{background:#fde9d2;color:#b45309;border-color:#f7d6ab}
+.paket-badge-v95.tm{background:#fee2e2;color:#b91c1c;border-color:#f7c5c5}
+.paket-badge-v95.non{background:#ede9fe;color:#6d28d9;border-color:#ddd3fb}
+.paket-badge-v95.ver{background:#e0edff;color:#1d4ed8;border-color:#c4dbff}
+.paket-toolbar-v95{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:10px 0 8px;flex-wrap:wrap}
+.paket-toolbar-v95 input{min-width:240px;padding:9px 12px;border:1px solid #d7e4ef;border-radius:10px}
+.paket-buat-v95{background:#16a34a}
+.paket-buka-v95{white-space:nowrap}
+.paket-backbar-v95{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.paket-backbar-v95>div{flex:1;min-width:200px}
+.sbv-overlay-v95{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;z-index:9999;padding:18px}
+.sbv-overlay-v95.hidden{display:none}
+.sbv-box-v95{background:#fff;border-radius:16px;max-width:860px;width:100%;max-height:88vh;display:flex;flex-direction:column;padding:18px;box-shadow:0 24px 60px rgba(2,20,43,.35)}
+.sbv-head-v95{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:10px}
+.sbv-box-v95>input{padding:10px 12px;border:1px solid #d7e4ef;border-radius:10px;margin-bottom:10px}
+.sbv-body-v95{overflow:auto;padding-right:6px}
+.sbv-body-v95 h4{margin:14px 0 6px;color:#0f3d75}
+.sbv-body-v95 table{width:100%;border-collapse:collapse;font-size:13px}
+.sbv-body-v95 th,.sbv-body-v95 td{border:1px solid #e2e9f2;padding:7px 9px;text-align:left}
+.sbv-body-v95 th{background:#f5f9ff}
+.sbv-nilai-v95{white-space:nowrap;font-weight:700;color:#0f3d75}
+@media(max-width:760px){.paket-toolbar-v95 input{min-width:0;width:100%}.paket-backbar-v95{align-items:flex-start}}
