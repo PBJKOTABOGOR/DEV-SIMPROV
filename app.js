@@ -1,4 +1,4 @@
-const API_URL = "https://script.google.com/macros/s/AKfycbzRwep7u22YZ6SX31Sx5xouE0057yWNlgMTwE_c9gsYObSV1uC9CRl-0tUROVu_B5FW/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbx4XUnew8cNITVZRSESG741nhXcj7AmOUlXjtQkYMcQLK7rjfPJkqIxwRIcjHg_T9WS/exec";
 
 let currentUser = null;
 let dashboard = null;
@@ -5590,71 +5590,736 @@ buildMonitoringReportBodyV55=function(semuaBidang){
   return html+section;
 };
 
+
 /* =========================================================
-   SIMPROV v96 - Baseline v93 + Penyedia & Realisasi sesuai SK
+   SIMPROV v94 (frontend) - Menu Pengadaan Langsung ala SPSE,
+   Master Penyedia, dan Pencatatan Belanja Langsung <= 500jt.
    ========================================================= */
-function menuItemsV96(){
-  const base=[];
-  if(isSuperAdminV65()) base.push(['Dashboard Monitoring','Dashboard Monitoring'],['Struktur Anggaran','Struktur Anggaran'],['Perencanaan','Perencanaan'],['Penyedia Realisasi','Penyedia & Realisasi'],['Pencairan','Pencatatan Pengadaan'],['Non Pengadaan','Pencatatan Non Pengadaan'],['Manajemen Akun','Manajemen Akun'],['Laporan','Laporan']);
-  else if(isVerifierV77()||isReviewer()) base.push(['Dashboard Monitoring','Dashboard Monitoring'],['Struktur Anggaran','Struktur Anggaran'],['Perencanaan','Perencanaan'],['Penyedia Realisasi','Penyedia & Realisasi'],['Pencairan','Pencatatan Pengadaan'],['Non Pengadaan','Pencatatan Non Pengadaan'],['Laporan','Laporan']);
-  else base.push(['Struktur Anggaran','Struktur Anggaran'],['Perencanaan','Perencanaan'],['Penyedia Realisasi','Penyedia & Realisasi'],['Pencairan','Pencatatan Pengadaan'],['Non Pengadaan','Pencatatan Non Pengadaan'],['Laporan','Laporan']);
-  return base;
+
+const TAHAPAN_PL_V94 = [
+  {no:1, nama:'Survei Harga & HPS', dok:['Hasil Survey Harga','Spesifikasi Teknis dan HPS']},
+  {no:2, nama:'Undangan Pengadaan Langsung', dok:['Surat Undangan Pengadaan Langsung']},
+  {no:3, nama:'Penawaran, Evaluasi & Negosiasi', dok:['Surat Penawaran','Berita Acara Evaluasi dan Negosiasi']},
+  {no:4, nama:'Penetapan Penyedia', dok:['Berita Acara Hasil Pengadaan Langsung']},
+  {no:5, nama:'SPK / Surat Perjanjian', dok:['Surat Perintah Kerja']},
+  {no:6, nama:'Pemeriksaan & Serah Terima', dok:['Berita Acara Pemeriksaan Barang/Pekerjaan','Berita Acara Serah Terima']},
+  {no:7, nama:'Pembayaran', dok:['Kuitansi / Nota / Invoice','Faktur Pembelian','SPTJM','Surat Permohonan Pembayaran','Nota Dinas Pencairan','Surat Perintah Pembayaran']}
+];
+function tahapanDefFeV95(metode){
+  const m = String(metode || '').toUpperCase();
+  return TAHAPAN_PL_V94.map(t => (t.no === 5 && m === 'TENDER MANUAL') ? {no:5, nama:'Surat Perjanjian / Kontrak', dok:['Surat Perjanjian / Kontrak']} : t);
 }
-renderMenu=function(){
-  const menus=menuItemsV96(); if(!menus.some(x=>x[0]===activeMenu))activeMenu=menus[0][0];
-  document.getElementById('menuNav').innerHTML=menus.map(([key,label])=>`<button class="${activeMenu===key?'active':''}" onclick="setMenu('${key}')">${label}</button>`).join('');
+
+dokumenKetentuanByMetode = function(metode){
+  const m = String(metode || "").toUpperCase();
+  if(m === "BELANJA LANGSUNG") return ["Hasil Survey Harga","Spesifikasi Teknis dan HPS","Kuitansi / Nota / Invoice","Berita Acara Pemeriksaan Barang/Pekerjaan","Berita Acara Serah Terima","Faktur Pembelian","SPTJM","Surat Permohonan Pembayaran","Nota Dinas Pencairan","Surat Perintah Pembayaran"];
+  if(m === "PENGADAAN LANGSUNG" || m === "TENDER MANUAL"){
+    const out = [];
+    tahapanDefFeV95(m).forEach(t => t.dok.forEach(j => { if(!out.includes(j)) out.push(j); }));
+    return out;
+  }
+  return JENIS_DOKUMEN_SOP;
 };
-function approvedProcV96(){return (dashboard?.perencanaan||[]).filter(k=>!isNonKategoriV81(k)&&isApprovedPlanningV84(k.status_perencanaan));}
-function processForV96(id){return (dashboard?.prosesPengadaan||[]).filter(x=>String(x.id_kegiatan)===String(id)).sort((a,b)=>(b._row||0)-(a._row||0))[0]||null;}
-function routeV96(k){const p=processForV96(k.id_kegiatan);if(p?.jalur_proses)return String(p.jalur_proses).toUpperCase();const n=Number(k.jumlah||0);if(n<=500000000)return'BELANJA LANGSUNG';if(n<=1000000000)return'PENGADAAN LANGSUNG';return'TENDER';}
-const __renderPencairanV96Base=renderPencairan;
-renderPencairan=function(){
-  const original=dashboard?.perencanaan||[];
-  if(dashboard)dashboard.perencanaan=original.filter(k=>!isNonKategoriV81(k)&&routeV96(k)==='BELANJA LANGSUNG');
-  try{__renderPencairanV96Base();}finally{if(dashboard)dashboard.perencanaan=original;}
-  const area=document.getElementById('contentArea');if(area){area.querySelectorAll('.panel-sub').forEach(p=>{if(/pencatatan pengadaan/i.test(p.textContent||''))p.insertAdjacentHTML('beforeend','<br><b>Khusus Belanja Langsung sampai dengan Rp500.000.000.</b>');});}
+
+function metodeKegiatanV94(k){ return String(k?.metode_pemilihan || metodePemilihanByNilai(k?.jumlah)).toUpperCase(); }
+function isBLV94(k){ return metodeKegiatanV94(k) === 'BELANJA LANGSUNG'; }
+function isPipelineV94(k){ const m = metodeKegiatanV94(k); return m === 'PENGADAAN LANGSUNG' || m === 'TENDER MANUAL'; }
+function dokKeyV94(v){ return String(v ?? '').trim().toUpperCase().replace(/\s*\/\s*/g,' / ').replace(/\s+/g,' '); }
+function isDokValidV94(d){ const s = String(d?.status_verifikasi || '').toUpperCase(); return s === 'VALID' || s === 'VALID DOKUMEN' || s === 'VALID KEUANGAN'; }
+
+function tahapanStateFeV94(k){
+  const rows = (dashboard?.pbjTahapanV94 || []).filter(t => String(t.id_kegiatan) === String(k.id_kegiatan));
+  const docs = (dashboard?.dokumen || []).filter(d => String(d.id_kegiatan) === String(k.id_kegiatan));
+  const docMap = {}; docs.forEach(d => docMap[dokKeyV94(d.jenis_dokumen)] = d);
+  const approved = String(k.status_perencanaan || '').toUpperCase() === 'DISETUJUI';
+  return tahapanDefFeV95(metodeKegiatanV94(k)).map(t => {
+    const row = rows.find(x => toNumber(x.tahap) === t.no) || null;
+    const dok = t.dok.map(j => {
+      const d = docMap[dokKeyV94(j)] || null;
+      return {jenis:j, uploaded:!!d, valid:!!(d && isDokValidV94(d)), status:d ? String(d.status_verifikasi || 'MENUNGGU') : 'BELUM DIUPLOAD', url:d ? String(d.url_file || '') : ''};
+    });
+    let status = row ? String(row.status || 'BELUM').toUpperCase() : 'BELUM';
+    return {tahap:t.no, nama_tahap:t.nama, status, dok, dok_lengkap_valid:dok.every(x => x.valid),
+      nama_penyedia:row ? String(row.nama_penyedia || '') : '', nilai_negosiasi:row ? toNumber(row.nilai_negosiasi) : 0,
+      nomor_dokumen:row ? String(row.nomor_dokumen || '') : '', tanggal_mulai:row ? String(row.tanggal_mulai || '') : '',
+      tanggal_selesai:row ? String(row.tanggal_selesai || '') : '', catatan:row ? String(row.catatan || '') : '',
+      updated_by:row ? String(row.updated_by || '') : ''};
+  });
+}
+function kontrakInfoFeV94(k){
+  const st = tahapanStateFeV94(k);
+  let nilai = 0, penyedia = '';
+  st.forEach(t => { if(t.nilai_negosiasi > 0) nilai = t.nilai_negosiasi; if(t.nama_penyedia) penyedia = t.nama_penyedia; });
+  return {nilai, penyedia};
+}
+
+/* Muat data penyedia + tahapan setelah dashboard dimuat */
+const __loadDashboardV94Base = loadDashboard;
+loadDashboard = async function(withLoader = true){
+  await __loadDashboardV94Base(withLoader);
+  await loadPbjDataV94();
 };
-function providerOptionsV96(selected='',bidang=''){return (dashboard?.penyedia||[]).filter(p=>!bidang||String(p.id_bidang)===String(bidang)||isAdmin()).map(p=>`<option value="${esc(p.id_penyedia)}" ${String(p.id_penyedia)===String(selected)?'selected':''}>${esc(p.nama_penyedia)}${p.nik_npwp?' • '+esc(p.nik_npwp):''}</option>`).join('');}
-function selectedPlanningV96(){const id=document.getElementById('prKegiatanV96')?.value;return approvedProcV96().find(x=>String(x.id_kegiatan)===String(id));}
-function renderProcessDetailV96(){
-  const k=selectedPlanningV96(),box=document.getElementById('processFormV96');if(!box)return;if(!k){box.innerHTML='<div class="empty-box">Pilih perencanaan yang akan diproses.</div>';return;}
-  const p=processForV96(k.id_kegiatan)||{},b=(dashboard.bidang||[]).find(x=>String(x.id_bidang)===String(k.id_bidang))||{};const readonly=isVerifierV77()||isReviewer();
-  box.innerHTML=`<div class="selected-kegiatan-detail-v92"><div><span>ID Kegiatan</span><b>${esc(k.id_kegiatan)}</b></div><div><span>Nama Kegiatan</span><b>${esc(k.nama_kegiatan)}</b></div><div><span>Bidang</span><b>${esc(b.nama_bidang||k.id_bidang)}</b></div><div><span>Nilai Perencanaan</span><b>${rupiah(k.jumlah)}</b></div><div><span>Pelaksana Kegiatan</span><b>${esc(b.pelaksana_pengadaan||'Belum diatur')}</b></div><div><span>Pejabat Komitmen</span><b>${esc(b.pejabat_komitmen||'Belum diatur')}</b></div></div>
-  <div class="process-grid-v96">
-    <div class="field"><label>Jalur Proses</label><select id="prJalurV96" ${readonly?'disabled':''}><option ${routeV96(k)==='PENGADAAN LANGSUNG'?'selected':''}>Pengadaan Langsung</option><option ${routeV96(k)==='TENDER'?'selected':''}>Tender</option><option ${routeV96(k)==='SWAKELOLA'?'selected':''}>Swakelola</option></select></div>
-    <div class="field"><label>Penyedia</label><select id="prProviderV96" ${readonly?'disabled':''}><option value="">Pilih penyedia...</option>${providerOptionsV96(p.id_penyedia,k.id_bidang)}</select></div>
-    <div class="field"><label>Jenis Kontrak</label><select id="prContractTypeV96" ${readonly?'disabled':''}><option ${p.jenis_kontrak==='Lump Sum'?'selected':''}>Lump Sum</option><option ${p.jenis_kontrak==='Harga Satuan'?'selected':''}>Harga Satuan</option><option ${p.jenis_kontrak==='Gabungan Lump Sum dan Harga Satuan'?'selected':''}>Gabungan Lump Sum dan Harga Satuan</option></select></div>
-    <div class="field"><label>Survey Penyedia/Toko A</label><input id="prSurvey1V96" value="${esc(p.survey_penyedia_1||'')}" ${readonly?'readonly':''}></div><div class="field"><label>Harga Survey A</label><input id="prHarga1V96" value="${p.harga_survey_1?formatAngka(p.harga_survey_1):''}" oninput="onAngkaInput(this)" ${readonly?'readonly':''}></div>
-    <div class="field"><label>Survey Penyedia/Toko B</label><input id="prSurvey2V96" value="${esc(p.survey_penyedia_2||'')}" ${readonly?'readonly':''}></div><div class="field"><label>Harga Survey B</label><input id="prHarga2V96" value="${p.harga_survey_2?formatAngka(p.harga_survey_2):''}" oninput="onAngkaInput(this)" ${readonly?'readonly':''}></div>
-    <div class="field span-2-v96"><label>Spesifikasi Teknis</label><textarea id="prSpecV96" ${readonly?'readonly':''}>${esc(p.spesifikasi_teknis||k.keterangan||'')}</textarea></div>
-    <div class="field"><label>Volume</label><input id="prVolV96" value="${esc(p.volume_proses||k.volume||'')}" ${readonly?'readonly':''}></div><div class="field"><label>Satuan</label><input id="prSatV96" value="${esc(p.satuan_proses||k.satuan||'')}" ${readonly?'readonly':''}></div>
-    <div class="field"><label>Nilai HPS</label><input id="prHpsV96" value="${p.nilai_hps?formatAngka(p.nilai_hps):formatAngka(k.jumlah)}" oninput="onAngkaInput(this)" ${readonly?'readonly':''}></div>
-    <div class="field"><label>Nilai Penawaran</label><input id="prOfferV96" value="${p.nilai_penawaran?formatAngka(p.nilai_penawaran):''}" oninput="onAngkaInput(this)" ${readonly?'readonly':''}></div>
-    <div class="field"><label>Nilai Negosiasi</label><input id="prNegoV96" value="${p.nilai_negosiasi?formatAngka(p.nilai_negosiasi):''}" oninput="onAngkaInput(this)" ${readonly?'readonly':''}></div>
-    <div class="field"><label>Nilai Kontrak</label><input id="prContractV96" value="${p.nilai_kontrak?formatAngka(p.nilai_kontrak):''}" oninput="onAngkaInput(this)" ${readonly?'readonly':''}></div>
-    <div class="field"><label>Nilai Realisasi</label><input id="prRealV96" value="${p.nilai_realisasi?formatAngka(p.nilai_realisasi):''}" oninput="onAngkaInput(this)" ${readonly?'readonly':''}></div>
-    <div class="field"><label>Nomor Penawaran</label><input id="prOfferNoV96" value="${esc(p.nomor_penawaran||'')}" ${readonly?'readonly':''}></div><div class="field"><label>Tanggal Penawaran</label><input type="date" id="prOfferDateV96" value="${esc(p.tanggal_penawaran||'')}" ${readonly?'readonly':''}></div>
-    <div class="field"><label>Nomor BA Penetapan</label><input id="prBANoV96" value="${esc(p.nomor_ba_penetapan||'')}" ${readonly?'readonly':''}></div><div class="field"><label>Tanggal BA Penetapan</label><input type="date" id="prBADateV96" value="${esc(p.tanggal_ba_penetapan||'')}" ${readonly?'readonly':''}></div>
-    <div class="field"><label>Nomor SPK/Kontrak</label><input id="prSPKNoV96" value="${esc(p.nomor_spk_kontrak||'')}" ${readonly?'readonly':''}></div><div class="field"><label>Tanggal SPK/Kontrak</label><input type="date" id="prSPKDateV96" value="${esc(p.tanggal_spk_kontrak||'')}" ${readonly?'readonly':''}></div>
-    <div class="field"><label>Mulai Pelaksanaan</label><input type="date" id="prStartV96" value="${esc(p.tanggal_mulai||'')}" ${readonly?'readonly':''}></div><div class="field"><label>Selesai Pelaksanaan</label><input type="date" id="prEndV96" value="${esc(p.tanggal_selesai||'')}" ${readonly?'readonly':''}></div>
-    <div class="field"><label>Nomor Invoice/Faktur</label><input id="prInvoiceV96" value="${esc(p.nomor_invoice||'')}" ${readonly?'readonly':''}></div><div class="field"><label>Tanggal Invoice/Faktur</label><input type="date" id="prInvoiceDateV96" value="${esc(p.tanggal_invoice||'')}" ${readonly?'readonly':''}></div>
-  </div>
-  ${readonly?'<div class="msg">Mode pemeriksaan: data hanya dapat dilihat oleh Verifikator.</div>':'<button onclick="saveProcessV96()">Simpan Penyedia & Realisasi</button>'}
-  <div class="template-panel-v96"><h4>Template Dokumen Berdasarkan SK Pengadaan</h4><div class="template-buttons-v96">${['Survey Harga','Spesifikasi dan HPS','BA Pemeriksaan','BA Serah Terima Penyedia','BA Serah Terima Ketua Umum','SPK'].map(x=>`<button class="btn-soft" onclick="generateTemplateV96('${x.toUpperCase()}')">Buat ${x}</button>`).join('')}</div><div class="generated-list-v96">${(dashboard.dokumenGeneratePengadaan||[]).filter(x=>String(x.id_kegiatan)===String(k.id_kegiatan)).map(x=>`<a target="_blank" href="${esc(x.url_file)}">${esc(x.jenis_template)} V${esc(x.versi)}</a>`).join('')||'<span>Belum ada template dibuat.</span>'}</div></div>`;
+async function loadPbjDataV94(){
+  if(!currentUser || !dashboard) return;
+  try{
+    const r = await apiPost({action:'getPbjDataV94', user:currentUser});
+    if(r?.success){
+      dashboard.penyediaV94 = Array.isArray(r.penyedia) ? r.penyedia : [];
+      dashboard.pbjTahapanV94 = Array.isArray(r.tahapan) ? r.tahapan : [];
+      if(activeMenu === 'Pengadaan Langsung') renderContent();
+    }
+  }catch(e){ dashboard.penyediaV94 = dashboard.penyediaV94 || []; dashboard.pbjTahapanV94 = dashboard.pbjTahapanV94 || []; }
 }
-async function saveProcessV96(){const k=selectedPlanningV96();if(!k)return;const data={id_kegiatan:k.id_kegiatan,jalur_proses:document.getElementById('prJalurV96').value,id_penyedia:document.getElementById('prProviderV96').value,survey_penyedia_1:document.getElementById('prSurvey1V96').value,harga_survey_1:toNumber(document.getElementById('prHarga1V96').value),survey_penyedia_2:document.getElementById('prSurvey2V96').value,harga_survey_2:toNumber(document.getElementById('prHarga2V96').value),spesifikasi_teknis:document.getElementById('prSpecV96').value,volume_proses:toNumber(document.getElementById('prVolV96').value),satuan_proses:document.getElementById('prSatV96').value,nilai_hps:toNumber(document.getElementById('prHpsV96').value),nilai_penawaran:toNumber(document.getElementById('prOfferV96').value),nilai_negosiasi:toNumber(document.getElementById('prNegoV96').value),nilai_kontrak:toNumber(document.getElementById('prContractV96').value),nilai_realisasi:toNumber(document.getElementById('prRealV96').value),nomor_penawaran:document.getElementById('prOfferNoV96').value,tanggal_penawaran:document.getElementById('prOfferDateV96').value,nomor_ba_penetapan:document.getElementById('prBANoV96').value,tanggal_ba_penetapan:document.getElementById('prBADateV96').value,nomor_spk_kontrak:document.getElementById('prSPKNoV96').value,tanggal_spk_kontrak:document.getElementById('prSPKDateV96').value,tanggal_mulai:document.getElementById('prStartV96').value,tanggal_selesai:document.getElementById('prEndV96').value,jenis_kontrak:document.getElementById('prContractTypeV96').value,nomor_invoice:document.getElementById('prInvoiceV96').value,tanggal_invoice:document.getElementById('prInvoiceDateV96').value,status_proses:'DIPROSES'};showLoading('Menyimpan proses pengadaan...');try{const r=await apiPost({action:'saveProsesPengadaanV96',user:currentUser,data});alert(r.message);if(r.success){await loadDashboard(false);renderPenyediaRealisasiV96();}}finally{hideLoading();}}
-async function generateTemplateV96(type){const k=selectedPlanningV96();if(!k)return;showLoading('Membuat template '+type+'...');try{const r=await apiPost({action:'generateProcurementTemplateV96',user:currentUser,data:{id_kegiatan:k.id_kegiatan,jenis_template:type}});alert(r.message);if(r.success){window.open(r.url_file,'_blank');await loadDashboard(false);renderPenyediaRealisasiV96();}}finally{hideLoading();}}
-async function saveProviderV96(){const k=selectedPlanningV96()||approvedProcV96()[0];if(!k){alert('Belum ada bidang kegiatan yang dipilih.');return;}const data={id_bidang:k.id_bidang,nama_penyedia:document.getElementById('pvNameV96').value,bentuk_usaha:document.getElementById('pvTypeV96').value,nik_npwp:document.getElementById('pvTaxV96').value,alamat:document.getElementById('pvAddressV96').value,telepon:document.getElementById('pvPhoneV96').value,nama_pimpinan:document.getElementById('pvLeaderV96').value,jabatan_pimpinan:document.getElementById('pvLeaderRoleV96').value,nomor_rekening:document.getElementById('pvAccountV96').value,nama_bank:document.getElementById('pvBankV96').value,atas_nama_rekening:document.getElementById('pvAccountNameV96').value};showLoading('Menyimpan penyedia...');try{const r=await apiPost({action:'savePenyediaV96',user:currentUser,data});alert(r.message);if(r.success){await loadDashboard(false);renderPenyediaRealisasiV96();}}finally{hideLoading();}}
-async function savePelaksanaV96(){const id=document.getElementById('plBidangV96').value,data={id_bidang:id,pelaksana_pengadaan:document.getElementById('plNameV96').value,jabatan_pelaksana:document.getElementById('plRoleV96').value,pejabat_komitmen:document.getElementById('pkNameV96').value,jabatan_pejabat_komitmen:document.getElementById('pkRoleV96').value};showLoading('Menyimpan penanggung jawab bidang...');try{const r=await apiPost({action:'savePelaksanaBidangV96',user:currentUser,data});alert(r.message);if(r.success){await loadDashboard(false);renderPenyediaRealisasiV96();}}finally{hideLoading();}}
-function syncPelaksanaFormV96(){const b=(dashboard.bidang||[]).find(x=>String(x.id_bidang)===String(document.getElementById('plBidangV96')?.value));if(!b)return;['plNameV96','plRoleV96','pkNameV96','pkRoleV96'].forEach((id,i)=>{const el=document.getElementById(id);if(el)el.value=[b.pelaksana_pengadaan,b.jabatan_pelaksana,b.pejabat_komitmen,b.jabatan_pejabat_komitmen][i]||'';});}
-function renderPenyediaRealisasiV96(){
-  const list=approvedProcV96();const userCanEdit=!isVerifierV77()&&!isReviewer();
-  document.getElementById('contentArea').innerHTML=`${isAdmin()?`<section class="panel premium-panel"><div class="panel-title-row"><div><h3>Pelaksana Kegiatan Pengadaan per Bidang</h3><p class="panel-sub">Nama ini digunakan pada template survey dan dokumen pengadaan. Pejabat Penanda Tangan Komitmen digunakan pada HPS, pemeriksaan, serah terima, dan SPK.</p></div></div><div class="process-grid-v96"><div class="field"><label>Bidang</label><select id="plBidangV96" onchange="syncPelaksanaFormV96()">${(dashboard.bidang||[]).map(b=>`<option value="${esc(b.id_bidang)}">${esc(b.nama_bidang)}</option>`).join('')}</select></div><div class="field"><label>Pelaksana Kegiatan Pengadaan</label><input id="plNameV96"></div><div class="field"><label>Jabatan Pelaksana</label><input id="plRoleV96" placeholder="Ketua Bidang/Sekretaris"></div><div class="field"><label>Pejabat Penanda Tangan Komitmen</label><input id="pkNameV96"></div><div class="field"><label>Jabatan Pejabat Komitmen</label><input id="pkRoleV96"></div></div><button onclick="savePelaksanaV96()">Simpan Penanggung Jawab Bidang</button></section>`:''}
-  <section class="panel premium-panel"><div class="panel-title-row"><div><h3>Penyedia & Realisasi</h3><p class="panel-sub">Pilih perencanaan yang telah disetujui, kemudian isi jalur proses Pengadaan Langsung, Tender, atau Swakelola. Belanja Langsung tetap diproses pada menu Pencatatan Pengadaan.</p></div></div><div class="field"><label>Pilih Perencanaan</label><select id="prKegiatanV96" onchange="renderProcessDetailV96()"><option value="">Pilih kegiatan...</option>${list.map(k=>`<option value="${esc(k.id_kegiatan)}">${esc(k.nama_kegiatan)} • ${rupiah(k.jumlah)} • ${esc(bidangName(k.id_bidang))}</option>`).join('')}</select></div><div id="processFormV96"></div></section>
-  ${userCanEdit?`<section class="panel premium-panel"><h3>Tambah Penyedia</h3><div class="process-grid-v96"><div class="field"><label>Nama Penyedia</label><input id="pvNameV96"></div><div class="field"><label>Bentuk Usaha</label><select id="pvTypeV96"><option>CV</option><option>PT</option><option>Koperasi</option><option>Perorangan</option></select></div><div class="field"><label>NIK/NPWP</label><input id="pvTaxV96"></div><div class="field span-2-v96"><label>Alamat</label><input id="pvAddressV96"></div><div class="field"><label>Telepon</label><input id="pvPhoneV96"></div><div class="field"><label>Nama Pimpinan</label><input id="pvLeaderV96"></div><div class="field"><label>Jabatan Pimpinan</label><input id="pvLeaderRoleV96" value="Direktur"></div><div class="field"><label>Bank</label><input id="pvBankV96"></div><div class="field"><label>Nomor Rekening</label><input id="pvAccountV96"></div><div class="field"><label>Atas Nama Rekening</label><input id="pvAccountNameV96"></div></div><button onclick="saveProviderV96()">Tambah Penyedia</button></section>`:''}
-  <section class="panel premium-panel"><h3>Rekap Proses Pengadaan</h3><div class="table-wrap"><table><thead><tr><th>Kegiatan</th><th>Jalur</th><th>Penyedia</th><th>HPS</th><th>Penawaran</th><th>Negosiasi</th><th>Kontrak</th><th>Realisasi</th><th>Status</th></tr></thead><tbody>${(dashboard.prosesPengadaan||[]).map(p=>{const k=(dashboard.perencanaan||[]).find(x=>String(x.id_kegiatan)===String(p.id_kegiatan));return`<tr><td>${esc(k?.nama_kegiatan||p.id_kegiatan)}</td><td>${esc(p.jalur_proses)}</td><td>${esc(p.nama_penyedia_snapshot||'-')}</td><td>${rupiah(p.nilai_hps)}</td><td>${rupiah(p.nilai_penawaran)}</td><td>${rupiah(p.nilai_negosiasi)}</td><td>${rupiah(p.nilai_kontrak)}</td><td>${rupiah(p.nilai_realisasi)}</td><td>${badge(p.status_proses||'DRAFT')}</td></tr>`;}).join('')||'<tr><td colspan="9" class="empty">Belum ada proses pengadaan</td></tr>'}</tbody></table></div></section>`;
-  if(isAdmin())setTimeout(syncPelaksanaFormV96,0);
+
+/* Menu baru: Pengadaan Langsung (setelah Pencairan) */
+const __menuItemsV94Base = menuItemsV83;
+menuItemsV83 = function(){
+  const m = __menuItemsV94Base().map(x => x.slice());
+  if(!m.some(x => x[0] === 'Pengadaan Langsung')){
+    const i = m.findIndex(x => x[0] === 'Pencairan');
+    m.splice(i >= 0 ? i + 1 : m.length, 0, ['Pengadaan Langsung','Pengadaan Langsung']);
+  }
+  return m;
+};
+const __renderContentV94Base = renderContent;
+renderContent = function(){
+  if(activeMenu === 'Pengadaan Langsung') return renderPengadaanLangsungV94();
+  return __renderContentV94Base();
+};
+
+function penyediaDatalistV94(){
+  const list = (dashboard?.penyediaV94 || []).filter(p => String(p.status_aktif || 'AKTIF').toUpperCase() !== 'NONAKTIF');
+  return `<datalist id="penyediaListV94">${list.map(p => `<option value="${esc(p.nama_penyedia)}">`).join('')}</datalist>`;
 }
-renderContent=function(){
-  if(activeMenu==='Dashboard Monitoring')return renderMonitoring();if(activeMenu==='Struktur Anggaran')return renderStruktur();if(activeMenu==='Perencanaan')return renderPerencanaan();if(activeMenu==='Penyedia Realisasi')return renderPenyediaRealisasiV96();if(activeMenu==='Pencairan')return renderPencairan();if(activeMenu==='Non Pengadaan')return renderNonPengadaanV79();if(activeMenu==='Manajemen Akun')return renderManajemenAkunV65();if(activeMenu==='Laporan')return typeof renderLaporan==='function'?renderLaporan():renderLaporanUser();return renderStruktur();
+
+function stepperHtmlV94(k, state){
+  return `<div class="pl-stepper-v94">${state.map(t => {
+    const cls = t.status === 'SELESAI' ? 'done' : (t.status === 'PROSES' ? 'proses' : (state.find(x => x.tahap === t.tahap - 1)?.status === 'SELESAI' || t.tahap === 1 ? 'next' : 'locked'));
+    return `<div class="pl-step-v94 ${cls}"><div class="pl-step-dot-v94">${t.status === 'SELESAI' ? '&#10003;' : t.tahap}</div><div class="pl-step-name-v94">${esc(t.nama_tahap)}</div></div>`;
+  }).join('<div class="pl-step-line-v94"></div>')}</div>`;
+}
+
+function tahapDetailHtmlV94(k, t, aktifBisaDiproses){
+  const dokRows = t.dok.map(x => `<div class="pl-dok-row-v94"><span class="pl-dok-chip-v94 ${x.valid ? 'ok' : (x.uploaded ? 'wait' : 'no')}">${x.valid ? 'VALID' : (x.uploaded ? esc(displayStatusText(x.status)) : 'BELUM DIUPLOAD')}</span> ${esc(x.jenis)}${x.url ? ` - <a href="${esc(x.url)}" target="_blank">Buka File</a>` : ''}</div>`).join('') || '';
+  const info = [];
+  if(t.nama_penyedia) info.push(`Penyedia: <b>${esc(t.nama_penyedia)}</b>`);
+  if(t.nilai_negosiasi > 0) info.push(`Nilai Negosiasi: <b>${rupiah(t.nilai_negosiasi)}</b>`);
+  if(t.nomor_dokumen) info.push(`No. Dokumen: ${esc(t.nomor_dokumen)}`);
+  if(t.tanggal_mulai || t.tanggal_selesai) info.push(`Periode: ${esc(t.tanggal_mulai || '-') } s.d. ${esc(t.tanggal_selesai || '-')}`);
+  if(t.catatan) info.push(`Catatan: ${esc(t.catatan)}`);
+  if(t.updated_by && t.status === 'SELESAI') info.push(`<span class="small">Diselesaikan oleh ${esc(t.updated_by)}</span>`);
+
+  let uploadHtml = '';
+  if(canUploadNonV83() && t.dok.some(x => !x.valid) && String(k.status_pencairan || '').toUpperCase() !== 'SELESAI'){
+    const opsi = t.dok.filter(x => !x.uploaded || !x.valid).map(x => `<option value="${esc(x.jenis)}">${esc(x.jenis)}</option>`).join('');
+    uploadHtml = `<div class="pl-upload-v94"><b>Upload dokumen tahap ini:</b><div class="pl-upload-row-v94"><select id="plJenis-${esc(k.id_kegiatan)}-${t.tahap}">${opsi}</select><input type="file" id="plFile-${esc(k.id_kegiatan)}-${t.tahap}"><button class="btn-soft" onclick="uploadDokTahapV94('${esc(k.id_kegiatan)}',${t.tahap})" type="button">Upload</button></div></div>`;
+  }
+
+  let formHtml = '';
+  if(isPBJVerifierV65() && aktifBisaDiproses && t.status !== 'SELESAI'){
+    const butuhPenyedia = t.tahap === 3 || t.tahap === 4;
+    const butuhNego = t.tahap === 3;
+    const butuhTanggal = t.tahap === 5;
+    formHtml = `<div class="pl-form-v94">
+      ${butuhPenyedia ? `<div class="field"><label>Nama Penyedia${t.tahap === 4 ? ' (terpilih)' : ''}</label><input list="penyediaListV94" id="plPenyedia-${esc(k.id_kegiatan)}-${t.tahap}" placeholder="Ketik nama penyedia (otomatis masuk master)" value="${esc(t.nama_penyedia)}"></div>` : ''}
+      ${butuhNego ? `<div class="field"><label>Nilai Hasil Negosiasi (Rp)</label><input type="number" id="plNego-${esc(k.id_kegiatan)}-${t.tahap}" min="0" value="${t.nilai_negosiasi || ''}" placeholder="Maks. ${rupiah(k.jumlah)}"></div>` : ''}
+      <div class="field"><label>Nomor Dokumen (BA/SPPBJ/SPK)</label><input type="text" id="plNomor-${esc(k.id_kegiatan)}-${t.tahap}" value="${esc(t.nomor_dokumen)}"></div>
+      ${butuhTanggal ? `<div class="field"><label>Tanggal Mulai</label><input type="date" id="plMulai-${esc(k.id_kegiatan)}-${t.tahap}" value="${esc(t.tanggal_mulai)}"></div><div class="field"><label>Tanggal Selesai</label><input type="date" id="plAkhir-${esc(k.id_kegiatan)}-${t.tahap}" value="${esc(t.tanggal_selesai)}"></div>` : ''}
+      <div class="field"><label>Catatan</label><input type="text" id="plCatatan-${esc(k.id_kegiatan)}-${t.tahap}" value="${esc(t.catatan)}"></div>
+      <button onclick="selesaikanTahapV94('${esc(k.id_kegiatan)}',${t.tahap})" type="button" ${t.dok_lengkap_valid ? '' : 'disabled title="Dokumen tahap ini belum lengkap/VALID"'}>Selesaikan Tahap ${t.tahap}</button>
+    </div>`;
+  }
+  let bukaHtml = '';
+  if(isPBJVerifierV65() && t.status === 'SELESAI' && String(k.status_pencairan || '').toUpperCase() !== 'SELESAI'){
+    bukaHtml = `<button class="btn-soft pl-buka-v94" onclick="bukaTahapV94('${esc(k.id_kegiatan)}',${t.tahap})" type="button">Buka Kembali</button>`;
+  }
+  return `<details class="pl-tahap-v94 ${t.status === 'SELESAI' ? 'done' : ''}" ${aktifBisaDiproses && t.status !== 'SELESAI' ? 'open' : ''}>
+    <summary><span class="pl-tahap-no-v94">Tahap ${t.tahap}</span> ${esc(t.nama_tahap)} <span class="pl-tahap-status-v94 ${t.status === 'SELESAI' ? 'ok' : ''}">${esc(t.status)}</span></summary>
+    <div class="pl-tahap-body-v94">${info.length ? `<div class="pl-info-v94">${info.join(' &middot; ')}</div>` : ''}${dokRows}${uploadHtml}${formHtml}${bukaHtml}</div>
+  </details>`;
+}
+
+function renderPengadaanLangsungV94(){
+  const plans = (dashboard?.perencanaan || []).filter(k => isProcurementV83(k) && isPipelineV94(k));
+  const approved = plans.filter(k => String(k.status_perencanaan || '').toUpperCase() === 'DISETUJUI');
+  const belum = plans.length - approved.length;
+
+  const cards = approved.map(k => {
+    const state = tahapanStateFeV94(k);
+    const selesaiCount = state.filter(t => t.status === 'SELESAI').length;
+    const final = String(k.status_pencairan || '').toUpperCase() === 'SELESAI';
+    const info = kontrakInfoFeV94(k);
+    let nextIdx = state.findIndex(t => t.status !== 'SELESAI');
+    const tahapHtml = state.map((t, i) => tahapDetailHtmlV94(k, t, i === nextIdx && !final)).join('');
+    return `<section class="panel fade-up premium-panel pl-card-v94">
+      <div class="panel-head"><div>
+        <h3>${esc(k.nama_kegiatan)}</h3>
+        <p class="panel-sub">${esc(k.id_kegiatan)} &middot; ${esc(bidangName(k.id_bidang))} &middot; ${esc(k.metode_pemilihan || metodePemilihanByNilai(k.jumlah))} &middot; Pagu ${rupiah(k.jumlah)}${info.nilai ? ` &middot; Negosiasi ${rupiah(info.nilai)}` : ''}${info.penyedia ? ` &middot; Penyedia: ${esc(info.penyedia)}` : ''}</p>
+      </div>
+      <span class="pl-progress-v94 ${final ? 'ok' : ''}">${final ? 'SELESAI' : 'Tahap ' + selesaiCount + '/7'}</span></div>
+      ${stepperHtmlV94(k, state)}
+      ${tahapHtml}
+    </section>`;
+  }).join('');
+
+  let penyediaPanel = '';
+  if(isPBJVerifierV65()){
+    const rows = (dashboard?.penyediaV94 || []).map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.nama_penyedia)}</td><td>${esc(p.npwp || '-')}</td><td>${esc(p.bank || '-')} ${esc(p.no_rekening || '')}</td><td>${esc(p.nama_kontak || '-')} ${esc(p.no_hp || '')}</td><td>${esc(String(p.status_aktif || 'AKTIF'))}</td><td><button class="btn-soft" onclick="editPenyediaV94('${esc(p.id_penyedia)}')" type="button">Edit</button></td></tr>`).join('');
+    penyediaPanel = `<section class="panel fade-up premium-panel collapsible-panel">
+      <div class="panel-head"><div><h3>Master Penyedia</h3><p class="panel-sub">Daftar rekanan/penyedia. Nama yang diketik manual pada tahapan otomatis terdaftar di sini agar tidak terjadi duplikasi ejaan.</p></div>${collapseButton('penyediaV94')}</div>
+      <div class="collapse-body ${collapseState.penyediaV94 ? 'hidden' : ''}">
+      <div class="form-grid">
+        <input type="hidden" id="pydId">
+        <div class="field"><label>Nama Penyedia *</label><input type="text" id="pydNama"></div>
+        <div class="field"><label>NPWP</label><input type="text" id="pydNpwp"></div>
+        <div class="field"><label>Alamat</label><input type="text" id="pydAlamat"></div>
+        <div class="field"><label>Bank</label><input type="text" id="pydBank"></div>
+        <div class="field"><label>No. Rekening</label><input type="text" id="pydRek"></div>
+        <div class="field"><label>Nama Kontak</label><input type="text" id="pydKontak"></div>
+        <div class="field"><label>No. HP</label><input type="text" id="pydHp"></div>
+        <div class="field"><label>Status</label><select id="pydStatus"><option value="AKTIF">AKTIF</option><option value="NONAKTIF">NONAKTIF</option></select></div>
+      </div>
+      <button onclick="savePenyediaFormV94()" type="button">Simpan Penyedia</button> <button class="btn-soft" onclick="resetPenyediaFormV94()" type="button">Reset Form</button>
+      <div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>No</th><th>Nama</th><th>NPWP</th><th>Rekening</th><th>Kontak</th><th>Status</th><th>Aksi</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="empty">Belum ada penyedia terdaftar</td></tr>'}</tbody></table></div>
+      </div></section>`;
+  }
+
+  document.getElementById('contentArea').innerHTML = `${penyediaDatalistV94()}
+    <section class="panel fade-up">
+      <div class="panel-title-row"><div><h3>Pengadaan Langsung (di atas 500 juta)</h3>
+      <p class="panel-sub">Proses bertahap ala SPSE: paket &rarr; penawaran &rarr; evaluasi &amp; negosiasi &rarr; penetapan penyedia &rarr; kontrak &rarr; serah terima &amp; pembayaran. Seluruh dokumen tiap tahap wajib VALID sebelum tahap berikutnya dibuka, dan seluruh tahap wajib tuntas sebelum pencairan diselesaikan.</p></div>
+      <button class="btn-refresh" onclick="refreshData()">Refresh Data</button></div>
+      ${belum ? `<p class="small">${belum} kegiatan Pengadaan Langsung/Tender masih menunggu persetujuan perencanaan dan belum masuk pipeline.</p>` : ''}
+    </section>
+    ${penyediaPanel}
+    ${cards || '<section class="panel fade-up"><p class="empty">Belum ada kegiatan Pengadaan Langsung / Tender Manual yang DISETUJUI.</p></section>'}`;
+}
+
+async function selesaikanTahapV94(idKegiatan, tahap){
+  const g = id => document.getElementById(id)?.value || '';
+  const data = {
+    nama_penyedia: g(`plPenyedia-${idKegiatan}-${tahap}`),
+    nilai_negosiasi: g(`plNego-${idKegiatan}-${tahap}`),
+    nomor_dokumen: g(`plNomor-${idKegiatan}-${tahap}`),
+    tanggal_mulai: g(`plMulai-${idKegiatan}-${tahap}`),
+    tanggal_selesai: g(`plAkhir-${idKegiatan}-${tahap}`),
+    catatan: g(`plCatatan-${idKegiatan}-${tahap}`)
+  };
+  if(!confirm(`Tandai Tahap ${tahap} SELESAI untuk kegiatan ini?`)) return;
+  showLoading('Menyimpan tahapan...');
+  try{
+    const r = await apiPost({action:'updateTahapanV94', user:currentUser, id_kegiatan:idKegiatan, tahap, data});
+    alert(r.message || (r.success ? 'Berhasil' : 'Gagal'));
+    if(r.success){ await loadDashboard(false); renderAll(); }
+  }catch(e){ alert('Gagal: ' + e.message); }
+  finally{ hideLoading(); }
+}
+async function bukaTahapV94(idKegiatan, tahap){
+  if(!confirm(`Buka kembali Tahap ${tahap} untuk perbaikan?`)) return;
+  showLoading('Membuka tahapan...');
+  try{
+    const r = await apiPost({action:'updateTahapanV94', user:currentUser, id_kegiatan:idKegiatan, tahap, mode:'BUKA'});
+    alert(r.message || (r.success ? 'Berhasil' : 'Gagal'));
+    if(r.success){ await loadDashboard(false); renderAll(); }
+  }catch(e){ alert('Gagal: ' + e.message); }
+  finally{ hideLoading(); }
+}
+async function uploadDokTahapV94(idKegiatan, tahap){
+  const jenis = document.getElementById(`plJenis-${idKegiatan}-${tahap}`)?.value;
+  const file = document.getElementById(`plFile-${idKegiatan}-${tahap}`)?.files?.[0];
+  if(!jenis || !file){ alert('Pilih jenis dokumen dan file dulu.'); return; }
+  showLoading('Upload dokumen tahap ' + tahap + '...');
+  try{
+    const base64 = await fileToBase64(file);
+    const r = await apiPost({action:'uploadDokumen', user:currentUser, id_kegiatan:idKegiatan, jenis_dokumen:jenis, file_name:file.name, mime_type:file.type, file_base64:base64});
+    alert(r.message || (r.success ? 'Dokumen terupload' : 'Gagal upload'));
+    if(r.success){ await loadDashboard(false); renderAll(); }
+  }catch(e){ alert('Gagal: ' + e.message); }
+  finally{ hideLoading(); }
+}
+function resetPenyediaFormV94(){ ['pydId','pydNama','pydNpwp','pydAlamat','pydBank','pydRek','pydKontak','pydHp'].forEach(i => { const el = document.getElementById(i); if(el) el.value = ''; }); const s = document.getElementById('pydStatus'); if(s) s.value = 'AKTIF'; }
+function editPenyediaV94(id){
+  const p = (dashboard?.penyediaV94 || []).find(x => String(x.id_penyedia) === String(id));
+  if(!p) return;
+  const set = (i, v) => { const el = document.getElementById(i); if(el) el.value = v || ''; };
+  set('pydId', p.id_penyedia); set('pydNama', p.nama_penyedia); set('pydNpwp', p.npwp); set('pydAlamat', p.alamat);
+  set('pydBank', p.bank); set('pydRek', p.no_rekening); set('pydKontak', p.nama_kontak); set('pydHp', p.no_hp);
+  set('pydStatus', String(p.status_aktif || 'AKTIF').toUpperCase());
+  document.getElementById('pydNama')?.scrollIntoView({behavior:'smooth', block:'center'});
+}
+async function savePenyediaFormV94(){
+  const g = id => document.getElementById(id)?.value || '';
+  if(!g('pydNama').trim()){ alert('Nama penyedia wajib diisi.'); return; }
+  showLoading('Menyimpan penyedia...');
+  try{
+    const r = await apiPost({action:'savePenyediaV94', user:currentUser, data:{id_penyedia:g('pydId'), nama_penyedia:g('pydNama'), npwp:g('pydNpwp'), alamat:g('pydAlamat'), bank:g('pydBank'), no_rekening:g('pydRek'), nama_kontak:g('pydKontak'), no_hp:g('pydHp'), status_aktif:g('pydStatus')}});
+    alert(r.message || (r.success ? 'Tersimpan' : 'Gagal'));
+    if(r.success){ resetPenyediaFormV94(); await loadDashboard(false); renderAll(); }
+  }catch(e){ alert('Gagal: ' + e.message); }
+  finally{ hideLoading(); }
+}
+
+/* Pencatatan Belanja Langsung (<= 500jt) di menu Pencairan untuk User Bidang.
+   Kegiatan Pengadaan Langsung/Tender diarahkan ke menu tahapan. */
+const __renderPencairanV94Base = renderPencairan;
+renderPencairan = function(){
+  __renderPencairanV94Base();
+  const area = document.getElementById('contentArea');
+  if(!area || !dashboard) return;
+  if(!canUploadNonV83()) return;
+  const blList = (dashboard.perencanaan || []).filter(k =>
+    isProcurementV83(k) && isBLV94(k) &&
+    String(k.status_perencanaan || '').toUpperCase() === 'DISETUJUI' &&
+    String(k.status_pencairan || '').toUpperCase() !== 'SELESAI' &&
+    String(k.id_bidang) === String(currentUser?.id_bidang || ''));
+  const opsi = blList.map(k => `<option value="${esc(k.id_kegiatan)}" data-jumlah="${toNumber(k.jumlah)}">${esc(k.nama_kegiatan)} - ${rupiah(k.jumlah)}</option>`).join('');
+  const panel = document.createElement('div');
+  panel.innerHTML = `${penyediaDatalistV94()}<section class="panel fade-up premium-panel bl-catat-v94">
+    <div class="panel-head"><div><h3>Pencatatan Belanja Langsung (&le; 500 juta)</h3>
+    <p class="panel-sub">Sesuai ketentuan, belanja sampai dengan 500 juta cukup dicatat tanpa syarat kelengkapan dokumen. Setelah dicatat, kegiatan langsung berstatus SELESAI dan masuk realisasi. Upload bukti (kwitansi, SPTJM, dsb.) tetap tersedia bila diperlukan.</p></div></div>
+    ${blList.length ? `<div class="form-grid">
+      <div class="field"><label>Pilih Kegiatan</label><select id="blKegiatanV94">${opsi}</select></div>
+      <div class="field"><label>Nilai Realisasi (Rp) *</label><input type="number" id="blNilaiV94" min="1"></div>
+      <div class="field"><label>Nama Penyedia / Toko</label><input list="penyediaListV94" id="blPenyediaV94" placeholder="Opsional - otomatis masuk master penyedia"></div>
+      <div class="field"><label>Nomor Bukti (Kwitansi/Nota)</label><input type="text" id="blBuktiV94"></div>
+      <div class="field"><label>Keterangan</label><input type="text" id="blKetV94"></div>
+    </div>
+    <button onclick="submitCatatBLV94()" type="button">Catat &amp; Tandai Selesai</button>` : '<p class="empty">Tidak ada kegiatan Belanja Langsung yang menunggu pencatatan.</p>'}
+  </section>`;
+  const fragV94 = document.createDocumentFragment();
+  while(panel.firstChild) fragV94.appendChild(panel.firstChild);
+  area.insertBefore(fragV94, area.firstChild);
+};
+async function submitCatatBLV94(){
+  const id = document.getElementById('blKegiatanV94')?.value;
+  const nilai = toNumber(document.getElementById('blNilaiV94')?.value);
+  if(!id){ alert('Pilih kegiatan dulu.'); return; }
+  if(nilai <= 0){ alert('Isi nilai realisasi.'); return; }
+  const maks = toNumber(document.querySelector(`#blKegiatanV94 option[value="${CSS.escape(id)}"]`)?.dataset?.jumlah);
+  if(maks > 0 && nilai > maks){ alert(`Nilai realisasi melebihi nilai perencanaan (${rupiah(maks)}).`); return; }
+  if(!confirm('Catat realisasi dan tandai kegiatan SELESAI?')) return;
+  showLoading('Mencatat Belanja Langsung...');
+  try{
+    const r = await apiPost({action:'catatBelanjaLangsungV94', user:currentUser, id_kegiatan:id,
+      nilai_realisasi:nilai, nama_penyedia:document.getElementById('blPenyediaV94')?.value || '',
+      nomor_bukti:document.getElementById('blBuktiV94')?.value || '', keterangan:document.getElementById('blKetV94')?.value || ''});
+    alert(r.message || (r.success ? 'Tercatat' : 'Gagal'));
+    if(r.success){ await loadDashboard(false); renderAll(); }
+  }catch(e){ alert('Gagal: ' + e.message); }
+  finally{ hideLoading(); }
+}
+
+
+/* =========================================================
+   SIMPROV v95 (frontend)
+   - Tampilan list paket ala SPSE untuk menu Pencairan
+     (Pencatatan Pengadaan), Pengadaan Langsung, dan Non Pengadaan:
+     halaman awal berisi daftar paket hasil generate dari
+     Perencanaan; klik paket -> detail (penyedia, nilai realisasi,
+     upload dokumen / pipeline tahapan).
+   - Referensi Standar Satuan Biaya sesuai SK 040.2/KONI.Kt.Bgr/SK/II/2026
+     sebagai acuan input Perencanaan.
+   ========================================================= */
+
+const STANDAR_BIAYA_V95 = [
+  {grup:'A. Insentif Khusus Pelindung & Pengurus Kontingen', items:[
+    ['Pelindung Kontingen','Orang/Bulan',5000000],['Penanggung Jawab','Orang/Bulan',5000000],['Ketua Kontingen','Orang/Bulan',5000000],
+    ['Wakil Ketua','Orang/Bulan',4500000],['Sekretaris','Orang/Bulan',4500000],['Wakil Sekretaris','Orang/Bulan',3500000],
+    ['Bendahara','Orang/Bulan',4500000],['Wakil Bendahara','Orang/Bulan',3500000],['Koordinator Wilayah','Orang/Bulan',3000000],
+    ['Sub Koordinator Wilayah','Orang/Bulan',2500000],['Ketua Bidang','Orang/Bulan',2500000],['Anggota','Orang/Bulan',2000000]]},
+  {grup:'B. Insentif Khusus Atlet dan Pelatih', items:[
+    ['Insentif Atlit Andalan Perorangan Olympiade','Orang/Bulan',5000000],['Insentif Atlit Andalan Perorangan Asian Games','Orang/Bulan',4500000],
+    ['Insentif Atlit Andalan Perorangan Sea Games','Orang/Bulan',4000000],['Insentif Atlit Andalan Perorangan Nasional','Orang/Bulan',3500000],
+    ['Insentif Atlit Andalan Perorangan PON','Orang/Bulan',3000000],['Insentif Atlit Andalan Pasangan PON','Orang/Bulan',2500000],
+    ['Insentif Atlit Andalan Beregu PON','Orang/Bulan',2000000],['Insentif Atlit Prioritas Perorangan Porprov','Orang/Bulan',1500000],
+    ['Insentif Atlit Potensial Perorangan','Orang/Bulan',1000000],['Insentif Atlit Potensial Beregu','Orang/Bulan',800000],
+    ['Insentif Pelatih Andalan Porprov','Orang/Bulan',3000000],['Insentif Pelatih Porprov','Orang/Bulan',1500000]]},
+  {grup:'C. Uang Saku', items:[
+    ['Uang Saku Tenaga Perbantuan Kontingen Porprov','Orang/Kegiatan',3000000],['Uang Saku Pengurus Kontingen Porprov','Orang/Kegiatan',3000000],
+    ['Uang Saku Atlet Porprov','Orang/Kegiatan',3000000],['Uang Saku Pelatih Porprov','Orang/Kegiatan',3000000],
+    ['Uang Saku Manajer Tim Porprov','Orang/Kegiatan',5000000],['Uang Saku Official Tim Porprov','Orang/Kegiatan',3000000],
+    ['Uang Saku Wasit Porprov','Orang/Kegiatan',3000000]]},
+  {grup:'D. Honorarium Game Week PB Porprov', items:[
+    ['Dewan Pembina','Orang/Hari',1250000],['Ketua Umum','Orang/Hari',1250000],['Ketua Harian','Orang/Hari',1150000],
+    ['Wakil Ketua Harian','Orang/Hari',1000000],['Ketua I, II dan III','Orang/Hari',1000000],['Sekretaris Umum','Orang/Hari',1000000],
+    ['Bendahara Umum','Orang/Hari',1000000],['Wakil Ketua I, II dan III','Orang/Hari',900000],['Wakil Sekretaris','Orang/Hari',900000],
+    ['Wakil Bendahara','Orang/Hari',900000],['Verifikator','Orang/Hari',900000],['Kepala Bidang/Kepala Bagian','Orang/Hari',800000],
+    ['Anggota','Orang/Hari',600000],['Panitia Pembantu','Orang/Hari',300000],['Tenaga IT Media Centre','Orang/Hari',300000],
+    ['Liaison Officer (LO)','Orang/Hari',250000],['Petugas Lapangan','Orang/Hari',100000]]},
+  {grup:'E. Honorarium Masa Persiapan PB Porprov', items:[
+    ['Dewan Pembina','Orang/Hari',5000000],['Ketua Umum','Orang/Hari',5000000],['Ketua Harian','Orang/Hari',4500000],
+    ['Wakil Ketua Harian','Orang/Hari',4000000],['Ketua I, II dan III','Orang/Hari',4000000],['Sekretaris Umum','Orang/Hari',4000000],
+    ['Bendahara Umum','Orang/Hari',4000000],['Wakil Ketua I, II dan III','Orang/Hari',3500000],['Wakil Sekretaris','Orang/Hari',3500000],
+    ['Wakil Bendahara','Orang/Hari',3500000],['Verifikator','Orang/Hari',3500000],['Kepala Bidang/Kepala Badan','Orang/Hari',3000000],
+    ['Anggota','Orang/Hari',2000000]]},
+  {grup:'F. Honorarium Monitoring Venue', items:[
+    ['Technical Delegate','Orang/Kegiatan',900000],['Supervisi/Panpel Cabor','Orang/Kegiatan',150000]]},
+  {grup:'G. Konsultan Hukum dan Advokasi', items:[
+    ['Legal Opinion','Paket',30000000],['Pendampingan Hukum','Paket','At Cost'],['Biaya Protes','Kali',5000000]]},
+  {grup:'H. Jasa Dokumentasi', items:[
+    ['Editor','Paket',8000000],['Photografer','Paket',7000000],['Social Media Admin','Paket',7000000],['Videografer','Paket',6500000]]},
+  {grup:'I. Jasa Media dan Publikasi', items:[
+    ['Publikasi Media Cetak Lokal Hitam/Putih (1/4 hal)','Publikasi',3167274],['Publikasi Media Cetak Lokal Berwarna (1/4 hal)','Publikasi',7500000],
+    ['Publikasi Media Cetak Regional Hitam/Putih (1/4 hal)','Publikasi',11517360],['Publikasi Media Cetak Regional Berwarna (1/4 hal)','Publikasi',16354651],
+    ['Publikasi Media Cetak Nasional Hitam/Putih (1/4 hal)','Publikasi',30521004],['Publikasi Media Cetak Nasional Berwarna (1/4 hal)','Publikasi',57586800],
+    ['Publikasi Media Online Lokal','Publikasi/Tayang',1299900],['Publikasi Media Online Regional','Publikasi/Tayang',2961607],
+    ['Publikasi Media Online Nasional','Publikasi/Tayang',5758680],['Publikasi Radio Lokal','Publikasi/Tayang',1029000]]},
+  {grup:'J. Akomodasi, Transportasi & Konsumsi', items:[
+    ['Snack','Per orang',15000],['Snack VIP','Per orang',30000],['Snack Hotel','Per orang',49000],
+    ['Nasi Box','Per orang',30000],['Nasi Box VIP','Per orang',50000],['Prasmanan','Per orang',60000],['Prasmanan VIP','Per orang',100000],['Jamuan Makan Hotel','Per orang',100000],
+    ['Mini Bus Sedang','Per Unit/hari',500000],['Mini Bus Besar','Per Unit/hari',700000],['Bus Medium','Per Unit/hari',2000000],['Bus Large','Per Unit/hari',3500000],
+    ['Uang Biaya Transportasi Lokal','Per Unit/hari',250000],
+    ['Penginapan Fullboard','Per orang',600000],['Biaya Penginapan','Kamar',600000],['Biaya Pemondokan Non Hotel','Per orang',200000],['Biaya Penginapan VIP','Per orang','At Cost']]},
+  {grup:'K. Uang Pengganti Transport', items:[
+    ['Pengganti Transport Technical Delegate','Orang/Kegiatan',500000],['Pengganti Transport Supervisi/Panpel Cabor','Orang/Kegiatan',100000],
+    ['Pengganti Transport Game Week LO','Orang/Kegiatan',100000],['Pengganti Transport Game Week Petugas Lapang','Orang/Kegiatan',100000],
+    ['Pengganti Transport Game Week Panitia Pembantu','Orang/Kegiatan',100000],['Biaya Transport Lokal','Per Unit/hari',250000]]},
+  {grup:'L. Uang Pengganti Makan (Voucher)', items:[
+    ['Uang Pengganti Makan VIP/Voucher VIP','Orang/Hari',110000],['Uang Pengganti Makan/Voucher','Orang/Hari',60000]]},
+  {grup:'M. Uang Ekstra Fooding', items:[['Uang Ekstra Fooding Kontingen Porprov','Orang/Hari',80000]]},
+  {grup:'N. Dana Motivasi Langsung Peraih Medali Emas', items:[
+    ['Perorangan','Medali',5000000],['Berpasangan','Medali',8000000],['Beregu 3 Orang','Medali',12000000],['Beregu Lebih dari 3 Orang','Medali',15000000]]},
+  {grup:'O. Biaya Operasional Tenaga Medis', items:[['Dokter','Paket',2000000],['Masseur','Paket',1500000]]},
+  {grup:'P. Operasional CDM & Penanggung Jawab Kontingen', items:[
+    ['Pelindung','Paket',10000000],['Penanggung Jawab','Paket',10000000],['Chief de Mission','Paket',10000000]]},
+  {grup:'Q. ATK, Barang Cetakan, dan Penutup Badan', items:[
+    ['Alat Tulis Kantor (ATK)','-','At Cost'],['Backdrop','Buah',500000],['Baligo','Buah',500000],['Spanduk','Buah',100000],
+    ['Sticker','Buah',10000],['Sticker Transportasi','Buah',20000],['Umbul-Umbul','Buah',100000],['X Banner','Buah',150000],
+    ['Buku I','Buah',75000],['Buku II','Buah',50000],['Buku III','Buah',30000],['Dokumen Kesepakatan','Buah',20000],
+    ['Boneka Maskot Rubo','Buah',60000],['Plakat','Buah',250000],['Fotocopy','Lembar',200],['Lembar Monitoring','Lembar',200],
+    ['Kontrak Pengadaan/Materi Meeting/Bagan Pertandingan','Buah',10000],['Sertifikat Juara dan Piagam Peserta','Buah',10000],
+    ['Technical Handbook Cabor','Buah',10000],['T-Shirt','Buah',125000],['Rompi','Buah',175000]]},
+  {grup:'R. Kegiatan Pendidikan dan Pelatihan/Bimtek', items:[
+    ['Honorarium Narasumber','Orang/Kegiatan',1000000],['Pengganti Transport Narasumber Bimtek','Orang/Kegiatan',500000],
+    ['Uang Saku Peserta','Orang/Kegiatan',150000],['Uang Saku Monitoring Evaluasi','Orang/Kegiatan',150000],
+    ['Uang Saku Pelaporan Admin','Orang/Kegiatan',150000],['Uang Saku Tenaga IT','Orang/Kegiatan',150000],
+    ['Pengganti Transport Peserta Bimtek','Orang/Kegiatan',100000],['Seminar KIT','Paket',50000]]},
+  {grup:'S. Satuan Biaya Perjalanan Dinas', items:[
+    ['Uang Harian Perjalanan Dinas (Jawa Barat)','Orang/Hari',430000],
+    ['Uang Representasi - Pelindung/Penanggungjawab/Ketua Kontingen/Ketua Umum/Dewan Pembina/Ketua Harian','Orang/Hari',250000],
+    ['Uang Representasi - Wakil Ketua Kontingen/Wakil Ketua Harian/Ketua PB','Orang/Hari',200000],
+    ['Uang Representasi - Wakil Ketua PB/Sekretaris/Bendahara/Verifikator','Orang/Hari',150000],
+    ['Transportasi ke Kabupaten Bogor','Kendaraan',195000],['Transportasi ke Kota Depok','Kendaraan',240000],
+    ['Transportasi ke Kota Sukabumi','Kendaraan',400000],['Transportasi ke Kabupaten Cianjur','Kendaraan',350000],
+    ['Transportasi ke Kota Bekasi','Kendaraan',390000],['Transportasi ke Kabupaten Sukabumi','Kendaraan',470000],
+    ['Transportasi ke Kabupaten Bekasi','Kendaraan',390000],['Transportasi ke Kabupaten Karawang','Kendaraan',540000],
+    ['Transportasi ke Kabupaten Purwakarta','Kendaraan',760000],['Transportasi ke Kabupaten Bandung Barat','Kendaraan',1020000],
+    ['Transportasi ke Kota Cimahi','Kendaraan',1050000],['Transportasi ke Kabupaten Bandung','Kendaraan',1130000],
+    ['Transportasi ke Kota Bandung','Kendaraan',1080000],['Transportasi ke Kabupaten Subang','Kendaraan',950000],
+    ['Transportasi ke Kabupaten Sumedang','Kendaraan',1350000],['Transportasi ke Kabupaten Garut','Kendaraan',1110000],
+    ['Transportasi ke Kabupaten Majalengka','Kendaraan',1370000],['Transportasi ke Kabupaten Tasikmalaya','Kendaraan',1350000],
+    ['Transportasi ke Kota Tasikmalaya','Kendaraan',1300000],['Transportasi ke Kabupaten Ciamis','Kendaraan',1670000],
+    ['Transportasi ke Kota Banjar','Kendaraan',1790000],['Transportasi ke Kabupaten Indramayu','Kendaraan',1530000],
+    ['Transportasi ke Kabupaten Cirebon','Kendaraan',1560000],['Transportasi ke Kabupaten Kuningan','Kendaraan',1700000],
+    ['Transportasi ke Kota Cirebon','Kendaraan',1560000],['Transportasi ke Kabupaten Pangandaran','Kendaraan',2020000]]},
+  {grup:'T. Satuan Biaya Paket Pelaksanaan Kegiatan Porprov', items:[
+    ['Focus Group Discussion (FGD) Porprov 2026','Paket',50000000],['Pembuatan Aplikasi Porprov','Paket',20000000],
+    ['Sewa Peralatan dan Perlengkapan Kantor PB Porprov','Paket',25000000],['Penutupan Porprov 2026 & Penyerahan Bendera','Paket',50000000],
+    ['Dekorasi Ruang Media Center','Paket',25000000],['Alat dan Kelengkapan UPP','Paket',67760000],
+    ['Perlengkapan Pos Pengamanan Terpadu','Paket',77985000],['Kesekretariatan PB Porprov','Paket',25000000],
+    ['Kesekretariatan Pertandingan Cabang Olahraga','Paket',6000000],['Pembuatan Laporan Pertanggungjawaban Cabor','Paket',2500000]]},
+  {grup:'U. Sewa Venue dan Kelengkapan Fasilitas Pendukung', items:[
+    ['Sewa Venue dan Kelengkapan Fasilitas Pendukung (dasar: hasil survey)','Paket','At Cost']]},
+  {grup:'V. Apparel dan Peralatan Latihan/Pertandingan Cabor', items:[
+    ['Apparel (dasar: survey min. 2 penyedia)','Paket','At Cost'],['Peralatan dan Perlengkapan Latihan & Pertandingan Cabor (dasar: survey min. 2 penyedia)','Paket','At Cost']]}
+];
+
+let sbvSearchV95 = '';
+function openStandarBiayaV95(){
+  let modal = document.getElementById('sbvModalV95');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'sbvModalV95';
+    modal.className = 'sbv-overlay-v95 hidden';
+    modal.innerHTML = `<div class="sbv-box-v95">
+      <div class="sbv-head-v95"><div><h3>Standar Satuan Biaya Porprov XV 2026</h3>
+      <p class="panel-sub">SK Ketua Umum KONI Kota Bogor No. 040.2/KONI.Kt.Bgr/SK/II/2026. Berfungsi sebagai batas tertinggi/estimasi dalam penyusunan dan pelaksanaan anggaran. Gunakan sebagai acuan Harga Satuan saat input Perencanaan.</p></div>
+      <button class="btn-red" onclick="document.getElementById('sbvModalV95').classList.add('hidden')" type="button">Tutup</button></div>
+      <input type="text" id="sbvSearchV95" placeholder="Cari jenis biaya... (mis. honor, snack, transport)" oninput="sbvSearchV95=this.value;renderStandarBiayaBodyV95()">
+      <div id="sbvBodyV95" class="sbv-body-v95"></div></div>`;
+    document.body.appendChild(modal);
+  }
+  modal.classList.remove('hidden');
+  renderStandarBiayaBodyV95();
+}
+function renderStandarBiayaBodyV95(){
+  const q = String(sbvSearchV95 || '').toLowerCase();
+  const html = STANDAR_BIAYA_V95.map(g => {
+    const rows = g.items.filter(it => !q || it[0].toLowerCase().includes(q) || g.grup.toLowerCase().includes(q))
+      .map(it => `<tr><td>${esc(it[0])}</td><td>${esc(it[1])}</td><td class="sbv-nilai-v95">${typeof it[2] === 'number' ? rupiah(it[2]) : esc(it[2])}</td></tr>`).join('');
+    if(!rows) return '';
+    return `<h4>${esc(g.grup)}</h4><table><thead><tr><th>Jenis Biaya</th><th>Satuan</th><th>Besaran</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }).join('');
+  const body = document.getElementById('sbvBodyV95');
+  if(body) body.innerHTML = html || '<p class="empty">Tidak ada jenis biaya yang cocok.</p>';
+}
+/* Tombol Standar Biaya di menu Perencanaan */
+const __renderPerencanaanV95Base = renderPerencanaan;
+renderPerencanaan = function(){
+  __renderPerencanaanV95Base();
+  const area = document.getElementById('contentArea');
+  if(!area) return;
+  const firstPanel = area.querySelector('.panel-title-row .action-group') || area.querySelector('.panel-title-row');
+  const btn = document.createElement('button');
+  btn.className = 'btn-soft';
+  btn.type = 'button';
+  btn.textContent = 'Standar Biaya (SK)';
+  btn.onclick = openStandarBiayaV95;
+  if(firstPanel) firstPanel.appendChild(btn);
+  else area.insertAdjacentHTML('afterbegin', `<section class="panel fade-up"><button class="btn-soft" type="button" onclick="openStandarBiayaV95()">Lihat Standar Biaya (SK 040.2/2026)</button></section>`);
+};
+
+/* ---------- Tampilan List Paket ala SPSE ---------- */
+let paketAktifV95 = null;      // id_kegiatan yang sedang dibuka detailnya
+let paketSearchV95 = '';
+const __setMenuV95Base = setMenu;
+setMenu = function(m){ paketAktifV95 = null; paketSearchV95 = ''; __setMenuV95Base(m); };
+
+function metodeBadgeV95(k){
+  if(isNonKategoriV81(k)) return `<span class="paket-badge-v95 non">${esc(k.jenis_non_pengadaan || 'Non Pengadaan')}</span>`;
+  const m = metodeKegiatanV94(k);
+  const cls = m === 'BELANJA LANGSUNG' ? 'bl' : (m === 'PENGADAAN LANGSUNG' ? 'pl' : 'tm');
+  return `<span class="paket-badge-v95 ${cls}">${esc(k.metode_pemilihan || metodePemilihanByNilai(k.jumlah))}</span> <span class="paket-badge-v95 ver">SIMPROV v95</span>`;
+}
+function paketStatusV95(k){
+  const sp = String(k.status_perencanaan || '').toUpperCase();
+  if(sp !== 'DISETUJUI') return sp === 'DITOLAK' ? 'DITOLAK' : 'MENUNGGU PERSETUJUAN PERENCANAAN';
+  const st = String(getPencairanStatus(k.id_kegiatan) || '').toUpperCase();
+  if(st === 'SELESAI') return 'Paket Sudah Selesai';
+  return displayStatusText(st);
+}
+function paketTanggalV95(k){ return k.tanggal_input ? formatTanggalJam(k.tanggal_input).split(' ').slice(0,3).join(' ') : '-'; }
+
+function paketListHtmlV95(list, opts){
+  const q = paketSearchV95.toLowerCase();
+  const rows = list
+    .filter(k => !q || String(k.nama_kegiatan || '').toLowerCase().includes(q) || String(k.id_kegiatan || '').toLowerCase().includes(q) || bidangName(k.id_bidang).toLowerCase().includes(q))
+    .map(k => `<tr class="paket-row-v95">
+      <td><a href="javascript:void(0)" onclick="bukaPaketV95('${esc(k.id_kegiatan)}')" class="paket-link-v95">${esc(k.nama_kegiatan)}</a> ${metodeBadgeV95(k)}</td>
+      <td>${esc(paketStatusV95(k))}</td>
+      <td>${esc(paketTanggalV95(k))}</td>
+      <td>${esc(bidangName(k.id_bidang))}</td>
+      <td><button class="btn-soft paket-buka-v95" onclick="bukaPaketV95('${esc(k.id_kegiatan)}')" type="button">${esc(opts.aksiLabel || 'Buka Paket')}</button></td>
+    </tr>`).join('');
+  const buatBtn = (!canManage() && !isReviewer()) ? `<button onclick="buatPaketV95()" type="button" class="paket-buat-v95">Buat Paket</button>` : '';
+  return `<section class="panel fade-up premium-panel">
+    <div class="panel-title-row"><div><h3>${esc(opts.judul)}</h3><p class="panel-sub">${opts.sub}</p></div>
+    <div class="action-group">${buatBtn}<button class="btn-refresh" onclick="refreshData()" type="button">Refresh Data</button></div></div>
+    ${opts.info || ''}
+    <div class="paket-toolbar-v95"><span>Tampilan <b>${list.length}</b> paket</span>
+    <input type="text" placeholder="Cari nama paket / bidang..." value="${esc(paketSearchV95)}" oninput="paketSearchV95=this.value;renderContent()"></div>
+    <div class="table-wrap"><table class="paket-table-v95"><thead><tr><th>Nama Paket</th><th>Status</th><th>Tanggal Buat</th><th>Bidang / Satuan Kerja</th><th>Aksi</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="5" class="empty">Belum ada paket. Paket muncul otomatis dari Perencanaan yang sudah dibuat${opts.butuhSetuju ? ' dan DISETUJUI' : ''}. Klik "Buat Paket" untuk membuat perencanaan baru.</td></tr>`}</tbody></table></div>
+  </section>`;
+}
+function bukaPaketV95(id){ paketAktifV95 = String(id); renderContent(); }
+function tutupPaketV95(){ paketAktifV95 = null; renderContent(); }
+function buatPaketV95(){
+  alert('Paket dibuat melalui menu Perencanaan. Setelah perencanaan DISETUJUI Verifikator, paket otomatis muncul di daftar ini.');
+  setMenu('Perencanaan');
+}
+function backBarV95(k, label){
+  return `<section class="panel fade-up paket-backbar-v95"><button class="btn-soft" onclick="tutupPaketV95()" type="button">&larr; Kembali ke Daftar Paket</button>
+  <div><b>${esc(k.nama_kegiatan)}</b><br><small>${esc(k.id_kegiatan)} &middot; ${esc(bidangName(k.id_bidang))} &middot; ${esc(label)} &middot; Nilai Perencanaan ${rupiah(k.jumlah)}</small></div>
+  <span class="pl-progress-v94 ${String(k.status_pencairan || '').toUpperCase() === 'SELESAI' ? 'ok' : ''}">${esc(paketStatusV95(k))}</span></section>`;
+}
+
+/* ----- Menu Pencairan -> Pencatatan Pengadaan (Belanja Langsung <= 500jt) ----- */
+function renderPencatatanPengadaanV95(){
+  const all = (dashboard?.perencanaan || []).filter(k => isProcurementV83(k) && isBLV94(k));
+  if(paketAktifV95){
+    const k = all.find(x => String(x.id_kegiatan) === paketAktifV95);
+    if(k) return renderDetailPencatatanV95(k);
+    paketAktifV95 = null;
+  }
+  document.getElementById('contentArea').innerHTML = paketListHtmlV95(all, {
+    judul:'Pencatatan Pengadaan - Belanja Langsung (&le; 500 juta)',
+    sub:'Sesuai SK 040.3/2026 dan notulensi: belanja sampai 500 juta prosesnya berupa pencatatan (bukti perjanjian: Kuitansi/Faktur/Struk). Klik paket untuk mencatat penyedia, nilai realisasi, dan upload dokumen.',
+    aksiLabel:'Paket Pencatatan', butuhSetuju:true,
+    info:(dashboard?.perencanaan || []).some(k => isProcurementV83(k) && isPipelineV94(k)) ? '<p class="small">Paket di atas 500 juta (Pengadaan Langsung/Tender) diproses melalui menu <b>Pengadaan Langsung</b> dengan tahapan lengkap.</p>' : ''
+  });
+}
+function dokumenTableV95(k, jenisList){
+  const docs = (dashboard?.dokumen || []).filter(d => String(d.id_kegiatan) === String(k.id_kegiatan));
+  const rows = jenisList.map(j => {
+    const d = docs.find(x => dokKeyV94(x.jenis_dokumen) === dokKeyV94(j));
+    let aksi = '-';
+    if(d && isPBJVerifierV65() && !isDokValidV94(d) && !['PERBAIKAN DOKUMEN','PERBAIKAN'].includes(String(d.status_verifikasi || '').toUpperCase())){
+      aksi = `<button class="btn-soft" onclick="verifDokV95('${esc(d.id_dokumen)}','VALID')" type="button">Valid</button> <button class="btn-red" onclick="verifDokV95('${esc(d.id_dokumen)}','PERBAIKAN')" type="button">Perbaikan</button>`;
+    }
+    return `<tr><td>${esc(j)}</td><td>${d ? `<a href="${esc(d.url_file)}" target="_blank">${esc(d.nama_file || 'Buka File')}</a>` : '<span class="muted">Belum diupload</span>'}</td>
+      <td>${d ? badge(d.status_verifikasi || 'MENUNGGU') : '-'}</td><td>${d ? esc(d.catatan_Verifikator || d.catatan_admin || '-') : '-'}</td><td>${aksi}</td></tr>`;
+  }).join('');
+  return `<div class="table-wrap"><table><thead><tr><th>Jenis Dokumen</th><th>File</th><th>Status</th><th>Catatan</th><th>Verifikasi</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+function renderDetailPencatatanV95(k){
+  const final = String(k.status_pencairan || '').toUpperCase() === 'SELESAI';
+  const approved = String(k.status_perencanaan || '').toUpperCase() === 'DISETUJUI';
+  const isBidangSendiri = !canManage() && !isReviewer() && String(k.id_bidang) === String(currentUser?.id_bidang || '');
+  const jenisList = dokumenKetentuanByMetode('BELANJA LANGSUNG');
+  const real = (dashboard?.realisasi || []).find(r => String(r.id_kegiatan) === String(k.id_kegiatan));
+  let catatHtml = '';
+  if(!approved){
+    catatHtml = `<p class="empty">Perencanaan paket ini belum DISETUJUI Verifikator, pencatatan belum bisa dilakukan.</p>`;
+  } else if(final){
+    catatHtml = `<div class="inline-non-complete-v93">Paket sudah SELESAI dicatat.${real ? ` Nilai realisasi ${rupiah(real.nilai_realisasi)}${real.keterangan ? ' - ' + esc(real.keterangan) : ''}` : ''}</div>`;
+  } else if(isBidangSendiri){
+    catatHtml = `${penyediaDatalistV94()}<div class="form-grid">
+      <div class="field"><label>Nama Penyedia / Toko</label><input list="penyediaListV94" id="blPenyediaV94" placeholder="Ketik nama (otomatis masuk master penyedia)"></div>
+      <div class="field"><label>Nilai Realisasi (Rp) *</label><input type="number" id="blNilaiV94" min="1" placeholder="Maks. ${rupiah(k.jumlah)}"></div>
+      <div class="field"><label>Nomor Bukti (Kuitansi/Nota/Invoice)</label><input type="text" id="blBuktiV94"></div>
+      <div class="field"><label>Keterangan</label><input type="text" id="blKetV94"></div></div>
+      <button onclick="submitCatatBLDetailV95('${esc(k.id_kegiatan)}')" type="button">Catat &amp; Tandai Selesai</button>`;
+  } else if(isPBJVerifierV65()){
+    catatHtml = `<p class="small">Pencatatan dilakukan User Bidang. Sebagai Verifikator, Anda dapat menandai paket SELESAI tanpa syarat kelengkapan dokumen (sesuai ketentuan pencatatan).</p>
+      <button onclick="selesaikanBLV95('${esc(k.id_kegiatan)}')" type="button">Tandai Paket SELESAI</button>`;
+  } else {
+    catatHtml = `<p class="small">Menunggu pencatatan oleh User Bidang.</p>`;
+  }
+  let uploadHtml = '';
+  if(approved && isBidangSendiri){
+    uploadHtml = `<div class="pl-upload-v94"><b>Upload dokumen pendukung (opsional, tidak menghambat pencatatan):</b>
+      <div class="pl-upload-row-v94"><select id="blJenisDokV95">${jenisList.map(j => `<option value="${esc(j)}">${esc(j)}</option>`).join('')}</select>
+      <input type="file" id="blFileDokV95"><button class="btn-soft" onclick="uploadDokBLV95('${esc(k.id_kegiatan)}')" type="button">Upload</button></div></div>`;
+  }
+  document.getElementById('contentArea').innerHTML = `${backBarV95(k, k.metode_pemilihan || 'Belanja Langsung')}
+    <section class="panel fade-up premium-panel"><div class="panel-head"><div><h3>Pencatatan Realisasi</h3>
+    <p class="panel-sub">Isi nama penyedia dan nilai realisasi belanja. Setelah dicatat, paket langsung berstatus SELESAI dan masuk realisasi anggaran.</p></div></div>${catatHtml}</section>
+    <section class="panel fade-up premium-panel"><div class="panel-head"><div><h3>Dokumen Paket (sesuai SK: Survey Harga, HPS, Kuitansi, BA, dan dokumen pencairan)</h3></div></div>
+    ${uploadHtml}${dokumenTableV95(k, jenisList)}</section>`;
+}
+async function submitCatatBLDetailV95(id){
+  const nilai = toNumber(document.getElementById('blNilaiV94')?.value);
+  if(nilai <= 0){ alert('Isi nilai realisasi.'); return; }
+  if(!confirm('Catat realisasi dan tandai paket SELESAI?')) return;
+  showLoading('Mencatat Belanja Langsung...');
+  try{
+    const r = await apiPost({action:'catatBelanjaLangsungV94', user:currentUser, id_kegiatan:id,
+      nilai_realisasi:nilai, nama_penyedia:document.getElementById('blPenyediaV94')?.value || '',
+      nomor_bukti:document.getElementById('blBuktiV94')?.value || '', keterangan:document.getElementById('blKetV94')?.value || ''});
+    alert(r.message || (r.success ? 'Tercatat' : 'Gagal'));
+    if(r.success){ await loadDashboard(false); renderAll(); }
+  }catch(e){ alert('Gagal: ' + e.message); }
+  finally{ hideLoading(); }
+}
+async function selesaikanBLV95(id){
+  const catatan = prompt('Catatan penyelesaian (opsional):') || '';
+  if(!confirm('Tandai paket Belanja Langsung ini SELESAI?')) return;
+  showLoading('Menyelesaikan paket...');
+  try{
+    const r = await apiPost({action:'updateStatusPencairan', user:currentUser, id_kegiatan:id, status_pencairan:'SELESAI', catatan_admin:catatan});
+    alert(r.message || (r.success ? 'Selesai' : 'Gagal'));
+    if(r.success){ await loadDashboard(false); renderAll(); }
+  }catch(e){ alert('Gagal: ' + e.message); }
+  finally{ hideLoading(); }
+}
+async function uploadDokBLV95(id){
+  const jenis = document.getElementById('blJenisDokV95')?.value;
+  const file = document.getElementById('blFileDokV95')?.files?.[0];
+  if(!jenis || !file){ alert('Pilih jenis dokumen dan file dulu.'); return; }
+  showLoading('Upload dokumen...');
+  try{
+    const base64 = await fileToBase64(file);
+    const r = await apiPost({action:'uploadDokumen', user:currentUser, id_kegiatan:id, jenis_dokumen:jenis, file_name:file.name, mime_type:file.type, file_base64:base64});
+    alert(r.message || (r.success ? 'Dokumen terupload' : 'Gagal upload'));
+    if(r.success){ await loadDashboard(false); renderAll(); }
+  }catch(e){ alert('Gagal: ' + e.message); }
+  finally{ hideLoading(); }
+}
+async function verifDokV95(idDok, status){
+  let catatan = '';
+  if(status === 'PERBAIKAN'){
+    catatan = prompt('Alasan perbaikan (wajib):') || '';
+    if(!catatan.trim()){ alert('Alasan perbaikan wajib diisi.'); return; }
+  }
+  showLoading('Memperbarui status dokumen...');
+  try{
+    const r = await apiPost({action:'verifyDokumen', user:currentUser, id_dokumen:idDok, status_verifikasi:status, catatan_admin:catatan});
+    alert(r.message || (r.success ? 'Status diperbarui' : 'Gagal'));
+    if(r.success){ await loadDashboard(false); renderAll(); }
+  }catch(e){ alert('Gagal: ' + e.message); }
+  finally{ hideLoading(); }
+}
+
+/* ----- Menu Pengadaan Langsung (> 500jt): list -> detail pipeline ----- */
+function renderPengadaanLangsungV95(){
+  const all = (dashboard?.perencanaan || []).filter(k => isProcurementV83(k) && isPipelineV94(k));
+  if(paketAktifV95){
+    const k = all.find(x => String(x.id_kegiatan) === paketAktifV95);
+    if(k) return renderDetailPengadaanLangsungV95(k);
+    paketAktifV95 = null;
+  }
+  let penyediaPanel = '';
+  if(isPBJVerifierV65()){
+    const rows = (dashboard?.penyediaV94 || []).map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.nama_penyedia)}</td><td>${esc(p.npwp || '-')}</td><td>${esc(p.bank || '-')} ${esc(p.no_rekening || '')}</td><td>${esc(p.nama_kontak || '-')} ${esc(p.no_hp || '')}</td><td>${esc(String(p.status_aktif || 'AKTIF'))}</td><td><button class="btn-soft" onclick="editPenyediaV94('${esc(p.id_penyedia)}')" type="button">Edit</button></td></tr>`).join('');
+    penyediaPanel = `<section class="panel fade-up premium-panel collapsible-panel">
+      <div class="panel-head"><div><h3>Master Penyedia</h3><p class="panel-sub">Karena penyedia tidak terhubung SPSE, nama yang diketik manual otomatis terdaftar di master ini agar ejaan konsisten.</p></div>${collapseButton('penyediaV94')}</div>
+      <div class="collapse-body ${collapseState.penyediaV94 ? 'hidden' : ''}">
+      <div class="form-grid"><input type="hidden" id="pydId">
+        <div class="field"><label>Nama Penyedia *</label><input type="text" id="pydNama"></div>
+        <div class="field"><label>NPWP</label><input type="text" id="pydNpwp"></div>
+        <div class="field"><label>Alamat</label><input type="text" id="pydAlamat"></div>
+        <div class="field"><label>Bank</label><input type="text" id="pydBank"></div>
+        <div class="field"><label>No. Rekening</label><input type="text" id="pydRek"></div>
+        <div class="field"><label>Nama Kontak</label><input type="text" id="pydKontak"></div>
+        <div class="field"><label>No. HP</label><input type="text" id="pydHp"></div>
+        <div class="field"><label>Status</label><select id="pydStatus"><option value="AKTIF">AKTIF</option><option value="NONAKTIF">NONAKTIF</option></select></div></div>
+      <button onclick="savePenyediaFormV94()" type="button">Simpan Penyedia</button> <button class="btn-soft" onclick="resetPenyediaFormV94()" type="button">Reset Form</button>
+      <div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>No</th><th>Nama</th><th>NPWP</th><th>Rekening</th><th>Kontak</th><th>Status</th><th>Aksi</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="empty">Belum ada penyedia terdaftar</td></tr>'}</tbody></table></div>
+      </div></section>`;
+  }
+  document.getElementById('contentArea').innerHTML = paketListHtmlV95(all, {
+    judul:'Pengadaan Langsung (di atas 500 juta)',
+    sub:'Sesuai SK 040.3/2026 Pasal 9: survei harga &rarr; spesifikasi &amp; HPS &rarr; undangan &rarr; penawaran, evaluasi &amp; negosiasi &rarr; penetapan penyedia &rarr; SPK/Surat Perjanjian &rarr; pemeriksaan &amp; serah terima &rarr; pembayaran. Dokumen tiap tahap wajib VALID sebelum lanjut, dan seluruh tahap wajib tuntas sebelum pencairan.',
+    aksiLabel:'Buka Tahapan', butuhSetuju:false
+  }) + penyediaPanel;
+}
+function renderDetailPengadaanLangsungV95(k){
+  const state = tahapanStateFeV94(k);
+  const final = String(k.status_pencairan || '').toUpperCase() === 'SELESAI';
+  const approved = String(k.status_perencanaan || '').toUpperCase() === 'DISETUJUI';
+  const info = kontrakInfoFeV94(k);
+  let nextIdx = state.findIndex(t => t.status !== 'SELESAI');
+  const tahapHtml = approved ? state.map((t, i) => tahapDetailHtmlV94(k, t, i === nextIdx && !final)).join('') : '<p class="empty">Perencanaan paket ini belum DISETUJUI, tahapan belum dapat diproses.</p>';
+  let finalisasiHtml = '';
+  if(isPBJVerifierV65() && approved && !final){
+    const semuaSelesai = state.every(t => t.status === 'SELESAI');
+    finalisasiHtml = `<section class="panel fade-up premium-panel"><div class="panel-head"><div><h3>Finalisasi Pencairan</h3>
+      <p class="panel-sub">Seluruh tahapan dan dokumen wajib tuntas terlebih dahulu. Nilai realisasi memakai nilai hasil negosiasi bila ada.</p></div></div>
+      <button onclick="selesaikanBLV95('${esc(k.id_kegiatan)}')" type="button" ${semuaSelesai ? '' : 'disabled title="Masih ada tahap yang belum SELESAI"'}>Selesaikan Paket (Pencairan)</button></section>`;
+  }
+  document.getElementById('contentArea').innerHTML = `${penyediaDatalistV94()}${backBarV95(k, (k.metode_pemilihan || 'Pengadaan Langsung') + (info.nilai ? ` \u00b7 Negosiasi ${rupiah(info.nilai)}` : '') + (info.penyedia ? ` \u00b7 ${info.penyedia}` : ''))}
+    <section class="panel fade-up premium-panel pl-card-v94">${stepperHtmlV94(k, state)}${tahapHtml}</section>${finalisasiHtml}`;
+}
+
+/* ----- Menu Non Pengadaan: list -> detail (pakai tampilan rincian v93) ----- */
+function renderNonPengadaanV95(){
+  const all = (dashboard?.perencanaan || []).filter(k => isNonKategoriV81(k));
+  if(paketAktifV95){
+    const k = all.find(x => String(x.id_kegiatan) === paketAktifV95);
+    if(k) return renderDetailNonPengadaanV95(k);
+    paketAktifV95 = null;
+  }
+  document.getElementById('contentArea').innerHTML = paketListHtmlV95(all, {
+    judul:'Pencatatan Non Pengadaan',
+    sub:'Paket anggaran non pengadaan (honorarium, insentif, uang saku, dsb. sesuai Standar Biaya SK 040.2/2026). Dokumen yang diupload: Tanda Terima dan Bukti Potong Pajak. Klik paket untuk mengelola penerima honor dan dokumen.',
+    aksiLabel:'Paket Pencatatan', butuhSetuju:true
+  });
+}
+function renderDetailNonPengadaanV95(k){
+  const original = dashboard.perencanaan;
+  dashboard.perencanaan = original.filter(x => String(x.id_kegiatan) === String(k.id_kegiatan));
+  try{ renderNonPengadaanV79(); }
+  finally{ dashboard.perencanaan = original; }
+  const area = document.getElementById('contentArea');
+  if(area) area.insertAdjacentHTML('afterbegin', backBarV95(k, k.jenis_non_pengadaan || 'Non Pengadaan'));
+}
+
+/* Router konten v95 */
+const __renderContentV95Base = renderContent;
+renderContent = function(){
+  if(activeMenu === 'Pencairan') return renderPencatatanPengadaanV95();
+  if(activeMenu === 'Pengadaan Langsung') return renderPengadaanLangsungV95();
+  if(activeMenu === 'Non Pengadaan') return renderNonPengadaanV95();
+  return __renderContentV95Base();
 };
