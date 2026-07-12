@@ -2637,3 +2637,8 @@ tr:has(.per-file-revision) td{
   pointer-events:none !important;
   user-select:none !important;
 }
+
+/* SIMPROV v112 */
+.honor-row-v112{display:grid;grid-template-columns:1.15fr 1fr 1.1fr .45fr 1fr 1fr 1.05fr .72fr auto;gap:10px;align-items:end}
+.realisasi-verif-actions-v112{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+@media(max-width:1100px){.honor-row-v112{grid-template-columns:repeat(2,minmax(0,1fr))}.honor-remove-wrap{grid-column:span 2}}
