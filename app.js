@@ -7201,3 +7201,70 @@ async function downloadTemplateV105(id,jenis){
   try{const r=await apiPost({action:'generateProcurementTemplateV101',user:currentUser,data:{id_kegiatan:id,jenis_template:jenis,nomor_dokumen:nomor,pejabat_penandatangan:pejabat,nama_penyedia:penyedia,nilai_hps:hps}});alert(r.message||'');if(r.success&&r.url_file)window.open(r.url_file,'_blank');}
   catch(e){alert('Gagal: '+e.message);}finally{hideLoading();}
 }
+
+/* =========================================================
+   SIMPROV v106 - Perbaikan Honorarium dan Upload Perbaikan
+   ========================================================= */
+function honorPlannedV106(){
+  const id=document.getElementById('honorKegV79')?.value||'';
+  return (dashboard?.perencanaan||[]).find(x=>String(x.id_kegiatan)===String(id))||{};
+}
+function honorRowV79(){
+  const k=honorPlannedV106();
+  const rate=toNumber(k?.harga_satuan)||0;
+  return `<div class="honor-row-v87 honor-row-v103">
+    <div class="field"><label>Nama Penerima</label><input class="hnama" placeholder="Nama lengkap" autocomplete="off"></div>
+    <div class="field"><label>NIK/NPWP (16 Digit)</label><input class="hnik" inputmode="numeric" maxlength="16" placeholder="16 digit angka" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,16)"></div>
+    <div class="field"><label>Jabatan / Peran</label><input class="hperan" placeholder="Contoh: Peserta"></div>
+    <div class="field"><label>Volume</label><input class="hvol" inputmode="numeric" value="1" min="1" step="1" oninput="this.value=this.value.replace(/[^0-9]/g,'')"></div>
+    <div class="field"><label>Satuan</label><input class="hsatuan" value="${esc(k?.satuan||'Orang/Kegiatan')}" readonly></div>
+    <div class="field"><label>Nilai Honor per Satuan</label><input class="htarif" value="${rate?Number(rate).toLocaleString('id-ID'):''}" data-value="${rate}" readonly></div>
+    <div class="field"><label>Kategori</label><select class="hkategori" onchange="syncHonorTaxV87(this)"><option value="NON ASN">Non-ASN / Bukan Pegawai</option><option value="ASN I-II">ASN Golongan I–II</option><option value="ASN III">ASN Golongan III</option><option value="ASN IV/PEJABAT">ASN Golongan IV / Pejabat Negara</option><option value="INPUT MANUAL">Input Pajak Manual</option></select></div>
+    <div class="field"><label>Tarif PPh 21 (%)</label><input class="hpajak" value="2,5" readonly></div>
+    <div class="honor-remove-wrap"><button class="btn-red" type="button" onclick="this.closest('.honor-row-v87').remove()">Hapus</button></div>
+  </div>`;
+}
+
+generateHonorV79=async function(){
+  const btn=document.getElementById('btnGenerateHonorV81'); if(btn?.dataset.busy==='1') return;
+  const modal=document.getElementById('honorModalV79');
+  const id=modal?.querySelector('#honorKegV79')?.value||'';
+  const k=(dashboard?.perencanaan||[]).find(x=>String(x.id_kegiatan)===String(id));
+  if(!k){alert('Data kegiatan tidak ditemukan. Silakan tutup lalu buka kembali form.');return;}
+  const plannedRate=toNumber(k.harga_satuan)||0;
+  const plannedVolume=toNumber(k.volume)||0;
+  const rows=[...(modal?.querySelectorAll('#honorRowsV79 .honor-row-v87')||[])];
+  if(!rows.length){alert('Baris penerima honor tidak ditemukan. Silakan tutup lalu buka kembali form.');return;}
+  const penerima=[]; let totalVolume=0;
+  for(let i=0;i<rows.length;i++){
+    const r=rows[i];
+    const nama=(r.querySelector('.hnama')?.value||'').trim();
+    const nik=(r.querySelector('.hnik')?.value||'').replace(/\D/g,'');
+    const volume=toNumber(r.querySelector('.hvol')?.value);
+    if(!nama){alert(`Nama penerima ke-${i+1} wajib diisi.`);return;}
+    if(!/^\d{16}$/.test(nik)){alert(`NIK/NPWP penerima ke-${i+1} wajib tepat 16 digit angka.`);return;}
+    if(!volume||volume<=0){alert(`Volume penerima ke-${i+1} wajib diisi.`);return;}
+    if(!plannedRate){alert('Nilai Honor belum tersedia dari Perencanaan.');return;}
+    totalVolume+=volume;
+    const kategori=r.querySelector('.hkategori')?.value||'NON ASN';
+    penerima.push({nama_penerima:nama,nik_npwp:nik,jabatan_peran:r.querySelector('.hperan')?.value||'',volume,satuan:k.satuan||'Orang/Kegiatan',tarif_honor:plannedRate,kategori_pajak:kategori,jenis_pajak:'PPh 21',tarif_pajak:toNumber(r.querySelector('.hpajak')?.value),nilai_pajak:0});
+  }
+  if(plannedVolume>0 && totalVolume>plannedVolume){alert(`Total volume penerima (${totalVolume}) melebihi Volume Perencanaan (${plannedVolume}).`);return;}
+  const total=penerima.reduce((s,p)=>s+(p.volume*plannedRate),0);
+  if(total>toNumber(k.jumlah)){alert(`Total honor ${rupiah(total)} melebihi Nilai Perencanaan ${rupiah(k.jumlah)}.`);return;}
+  if(btn){btn.dataset.busy='1';btn.disabled=true;btn.textContent='Memproses...';}
+  showLoading('Membuat dokumen honorarium dan menyimpan ke Google Drive...');
+  try{
+    const res=await apiPost({action:'generateHonorPdf',user:currentUser,data:{id_kegiatan:id,penerima}});
+    alert(res.message||'Proses selesai');
+    if(res.success){modal?.classList.add('hidden');await loadDashboard(false);renderAll();}
+  }catch(e){alert(e.message||e);}finally{hideLoading();if(btn){btn.dataset.busy='0';btn.disabled=false;btn.textContent='Buat Dokumen Honorarium';}}
+};
+
+// Status upload ulang harus langsung terbaca sebagai menunggu verifikasi perbaikan.
+const uploadSemuaDokV106Base=uploadSemuaDokV96;
+uploadSemuaDokV96=async function(idKegiatan){
+  await uploadSemuaDokV106Base(idKegiatan);
+  // Paksa sinkronisasi terbaru agar Choose File hilang setelah upload berhasil.
+  try{await loadDashboard(false);renderAll();}catch(e){}
+};
