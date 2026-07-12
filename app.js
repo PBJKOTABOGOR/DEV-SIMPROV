@@ -8043,3 +8043,107 @@ renderDetailNonPengadaanV95=function(k){
   }
   return out;
 };
+
+/* =========================================================
+   SIMPROV v113 - Finalisasi Non Pengadaan, Ringkasan Kontekstual,
+   dan Nilai Honor mengikuti volume
+   ========================================================= */
+function isRealFinalV113(real){
+  return !!real && ['FINAL','DISETUJUI','SELESAI','SAH'].includes(String(real.status||'').toUpperCase());
+}
+
+nonPipelineV103=function(k,n,docs,real){
+  const up=s=>String(s||'').toUpperCase();
+  const latest=latestRequiredNonDocsV109(docs);
+  const approved=up(k.status_perencanaan)==='DISETUJUI';
+  const isHonor=up(k.jenis_non_pengadaan||'').includes('HONOR');
+  const generated=!isHonor||!!n?.url_pdf;
+  const complete=latest.length===2&&latest.every(d=>d.url_file);
+  const hasRepair=latest.some(d=>['PERBAIKAN DOKUMEN','PERBAIKAN'].includes(up(d.status_verifikasi)));
+  const waitingRepair=latest.some(d=>up(d.status_verifikasi)==='MENUNGGU VERIFIKASI PERBAIKAN DOKUMEN');
+  const allValid=complete&&latest.every(d=>up(d.status_verifikasi)==='VALID DOKUMEN');
+  const realFinal=isRealFinalV113(real);
+  // Paket dianggap selesai berdasarkan kondisi nyata, tidak hanya bergantung pada status cache di PERENCANAAN.
+  const final=allValid&&realFinal;
+  const stages=[
+    {no:1,label:'Perencanaan Disetujui',state:approved?'done':''},
+    {no:2,label:'Dokumen Honor Dibuat',state:generated?'done':''},
+    {no:3,label:'Dokumen Wajib Diunggah',state:hasRepair?'repair':(complete?'done':(waitingRepair?'waiting':''))},
+    {no:4,label:'Pencatatan Realisasi',state:real?'done':(complete?'waiting':'')},
+    {no:5,label:'Verifikasi Dokumen',state:allValid?'done':(hasRepair?'repair':((complete||waitingRepair)?'waiting':''))},
+    {no:6,label:'Selesai',state:final?'done':''}
+  ];
+  return `<div class="pipeline-v103">${stages.map(x=>statusPipelineNonV104(x,x.state)).join('')}</div>`;
+};
+
+const __renderDetailNonV113Base=renderDetailNonPengadaanV95;
+renderDetailNonPengadaanV95=function(k){
+  const result=__renderDetailNonV113Base.apply(this,arguments);
+  const docs=(dashboard?.dokumenNonPengadaan||[]).filter(d=>String(d.id_kegiatan)===String(k.id_kegiatan));
+  const latest=latestRequiredNonDocsV109(docs);
+  const real=(dashboard?.realisasi||[]).find(r=>String(r.id_kegiatan)===String(k.id_kegiatan)&&String(r.status||'').toUpperCase()!=='DIBATALKAN');
+  const allValid=latest.length===2&&latest.every(d=>String(d.status_verifikasi||'').toUpperCase()==='VALID DOKUMEN');
+  if(allValid&&isRealFinalV113(real)){
+    k.status_pencairan='SELESAI';
+    const badgeEl=document.querySelector('.package-topbar-v95 .status-badge-v60, .detail-backbar-v95 .status-badge-v60');
+    if(badgeEl){badgeEl.className='status-badge-v60 status-green';badgeEl.textContent='SELESAI';}
+  }
+  return result;
+};
+
+function dokumenSummaryByMenuV113(){
+  const peng=(dashboard?.dokumen||[]).filter(d=>d&&d.url_file);
+  const non=(dashboard?.dokumenNonPengadaan||[]).filter(d=>d&&d.url_file);
+  const menu=String(activeMenu||'');
+  if(menu==='Non Pengadaan'||menu==='Pencatatan Non Pengadaan') return non;
+  if(menu==='Pencairan'||menu==='Pencatatan Pengadaan'||menu==='Pengadaan Langsung') return peng;
+  return peng.concat(non);
+}
+
+renderSummary=function(){
+  const wrap=document.getElementById('summaryCards');
+  if(!wrap||!dashboard){if(wrap)wrap.innerHTML='';return;}
+  const sum=getDashboardSummaryV81();
+  const docs=dokumenSummaryByMenuV113();
+  const valid=docs.filter(isDocValidV64).length;
+  if(canSeeAll()){
+    wrap.innerHTML=card('Total Pagu',rupiah(sum.total_pagu))
+      +card('Total Perencanaan',rupiah(sum.total_perencanaan))
+      +card('Total Realisasi',rupiah(sum.total_realisasi))
+      +card('Sisa Pagu',rupiah(sum.sisa_pagu))
+      +card('Dokumen Valid',`${valid}/${docs.length}`);
+  }else{
+    const r=(dashboard.rekap||[]).find(x=>String(x.id_bidang)===String(currentUser.id_bidang))||{};
+    const realisasiBidang=toNumber(r.total_realisasi);
+    wrap.innerHTML=card('Pagu Bidang',rupiah(r.pagu))
+      +card('Total Perencanaan',rupiah(r.total_perencanaan))
+      +card('Total Realisasi',rupiah(realisasiBidang))
+      +card('Sisa Pagu',rupiah(toNumber(r.pagu)-realisasiBidang))
+      +card('Status Akses',r.status_akses||'-');
+  }
+};
+
+function syncHonorAmountV113(input){
+  const row=input?.closest('.honor-row-v112'); if(!row)return;
+  const vol=Math.max(0,toNumber(row.querySelector('.hvol')?.value));
+  const rate=toNumber(row.dataset.unitRate);
+  const total=vol*rate;
+  const out=row.querySelector('.htarif');
+  if(out){out.value=Number(total||0).toLocaleString('id-ID');out.dataset.value=String(total);}
+}
+
+honorRowV112=function(k){
+  k=k||{};
+  const rate=toNumber(k.harga_satuan)||0;
+  return `<div class="honor-row-v112 honor-row-v87" data-unit-rate="${rate}">
+    <div class="field"><label>Nama Penerima</label><input class="hnama" placeholder="Nama lengkap" autocomplete="off"></div>
+    <div class="field"><label>NIK/NPWP (16 Digit)</label><input class="hnik" inputmode="numeric" maxlength="16" placeholder="16 digit angka" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,16)"></div>
+    <div class="field"><label>Jabatan / Peran</label><input class="hperan" placeholder="Contoh: Peserta"></div>
+    <div class="field"><label>Volume</label><input class="hvol" inputmode="numeric" value="1" min="1" step="1" oninput="this.value=this.value.replace(/[^0-9]/g,'');syncHonorAmountV113(this)"></div>
+    <div class="field"><label>Satuan</label><input class="hsatuan" value="${esc(k.satuan||'Orang/Kegiatan')}" readonly></div>
+    <div class="field"><label>Nilai Honor</label><input class="htarif" value="${rate?Number(rate).toLocaleString('id-ID'):''}" data-value="${rate}" readonly tabindex="-1" title="Volume × Harga Satuan Perencanaan"></div>
+    <div class="field"><label>Kategori</label><select class="hkategori" onchange="syncHonorTaxV112(this)"><option value="INPUT MANUAL" selected>Input Pajak Manual</option><option value="NON ASN">Non-ASN / Bukan Pegawai</option><option value="ASN I-II">ASN Golongan I–II</option><option value="ASN III">ASN Golongan III</option><option value="ASN IV/PEJABAT">ASN Golongan IV / Pejabat Negara</option></select></div>
+    <div class="field"><label>Tarif PPh 21 (%)</label><input class="hpajak" value="" placeholder="Masukkan persen" inputmode="decimal"></div>
+    <div class="honor-remove-wrap"><button class="btn-red" type="button" onclick="this.closest('.honor-row-v112').remove()">Hapus</button></div>
+  </div>`;
+};
