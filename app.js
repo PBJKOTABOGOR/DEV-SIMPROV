@@ -6985,7 +6985,7 @@ renderDetailNonPengadaanV95=function(k){
   const n=(typeof latestNonV79==='function')?latestNonV79(k.id_kegiatan):null;
   const docs=(dashboard?.dokumenNonPengadaan||[]).filter(d=>String(d.id_kegiatan)===String(k.id_kegiatan));
   const real=(dashboard?.realisasi||[]).find(r=>String(r.id_kegiatan)===String(k.id_kegiatan));
-  let final=String(k.status_pencairan||'').toUpperCase()==='SELESAI';
+  const final=String(k.status_pencairan||'').toUpperCase()==='SELESAI';
   const approved=String(k.status_perencanaan||'').toUpperCase()==='DISETUJUI';
   const isBidangSendiri=!canManage()&&!isReviewer()&&String(k.id_bidang)===String(currentUser?.id_bidang||'');
   const isHonor=String(k.jenis_non_pengadaan||'Honorarium').toUpperCase().includes('HONOR');
@@ -7216,7 +7216,7 @@ function honorRowV79(){
     <div class="field"><label>Nama Penerima</label><input class="hnama" placeholder="Nama lengkap" autocomplete="off"></div>
     <div class="field"><label>NIK/NPWP (16 Digit)</label><input class="hnik" inputmode="numeric" maxlength="16" placeholder="16 digit angka" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,16)"></div>
     <div class="field"><label>Jabatan / Peran</label><input class="hperan" placeholder="Contoh: Peserta"></div>
-    <div class="field"><label>Volume</label><input class="hvol" inputmode="numeric" value="1" min="1" step="1" oninput="this.value=this.value.replace(/[^0-9]/g,'');syncHonorTotalV114(this)"></div>
+    <div class="field"><label>Volume</label><input class="hvol" inputmode="numeric" value="1" min="1" step="1" oninput="this.value=this.value.replace(/[^0-9]/g,'')"></div>
     <div class="field"><label>Satuan</label><input class="hsatuan" value="${esc(k?.satuan||'Orang/Kegiatan')}" readonly></div>
     <div class="field"><label>Nilai Honor per Satuan</label><input class="htarif" value="${rate?Number(rate).toLocaleString('id-ID'):''}" data-value="${rate}" readonly></div>
     <div class="field"><label>Kategori</label><select class="hkategori" onchange="syncHonorTaxV87(this)"><option value="NON ASN">Non-ASN / Bukan Pegawai</option><option value="ASN I-II">ASN Golongan I–II</option><option value="ASN III">ASN Golongan III</option><option value="ASN IV/PEJABAT">ASN Golongan IV / Pejabat Negara</option><option value="INPUT MANUAL">Input Pajak Manual</option></select></div>
@@ -7665,8 +7665,6 @@ renderDetailNonPengadaanV95=function(k){
   const isHonor=String(k.jenis_non_pengadaan||'Honorarium').toUpperCase().includes('HONOR');
   const complete=latest.length===2&&latest.every(d=>d.url_file);
   const allValid=complete&&latest.every(d=>String(d.status_verifikasi||'').toUpperCase()==='VALID DOKUMEN');
-  final=final||(allValid&&isRealFinalV113(real));
-  if(final) k.status_pencairan='SELESAI';
   const ringkas=`<div class="non-stat-grid-v96"><div class="non-stat-v96"><small>Jenis</small><b>${esc(k.jenis_non_pengadaan||'Non Pengadaan')}</b></div><div class="non-stat-v96"><small>Nilai Perencanaan</small><b>${rupiah(k.jumlah)}</b></div><div class="non-stat-v96"><small>Total Bruto</small><b>${rupiah(n?.total_bruto||0)}</b></div><div class="non-stat-v96"><small>Total Pajak</small><b>${rupiah(n?.total_pajak||0)}</b></div><div class="non-stat-v96"><small>Total Netto</small><b>${rupiah(n?.total_netto||0)}</b></div><div class="non-stat-v96"><small>Dokumen PDF</small><b>${n?.url_pdf?`<a href="${esc(n.url_pdf)}" target="_blank">Buka PDF v${esc(String(n.versi_pdf||1))}</a>`:'Belum dibuat'}</b></div></div>`;
   const honorBtn=isHonor&&isOwner&&approved&&!final?`<button onclick="openHonorModalV79('${esc(k.id_kegiatan)}')" type="button">${n?.url_pdf?'Buat Ulang Dokumen Honor':'Buat Dokumen Honorarium'}</button>`:'';
   let catatHtml='';
@@ -7963,9 +7961,9 @@ function honorRowV112(k){
     <div class="field"><label>Nama Penerima</label><input class="hnama" placeholder="Nama lengkap" autocomplete="off"></div>
     <div class="field"><label>NIK/NPWP (16 Digit)</label><input class="hnik" inputmode="numeric" maxlength="16" placeholder="16 digit angka" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,16)"></div>
     <div class="field"><label>Jabatan / Peran</label><input class="hperan" placeholder="Contoh: Peserta"></div>
-    <div class="field"><label>Volume</label><input class="hvol" inputmode="numeric" value="1" min="1" step="1" oninput="this.value=this.value.replace(/[^0-9]/g,'');syncHonorTotalV114(this)"></div>
+    <div class="field"><label>Volume</label><input class="hvol" inputmode="numeric" value="1" min="1" step="1" oninput="this.value=this.value.replace(/[^0-9]/g,'')"></div>
     <div class="field"><label>Satuan</label><input class="hsatuan" value="${esc(k.satuan||'Orang/Kegiatan')}" readonly></div>
-    <div class="field"><label>Nilai Honor</label><input class="htarif" value="${rate?Number(rate).toLocaleString('id-ID'):''}" data-rate="${rate}" data-value="${rate}" readonly tabindex="-1"></div>
+    <div class="field"><label>Nilai Honor per Satuan</label><input class="htarif" value="${rate?Number(rate).toLocaleString('id-ID'):''}" data-value="${rate}" readonly tabindex="-1"></div>
     <div class="field"><label>Kategori</label><select class="hkategori" onchange="syncHonorTaxV112(this)"><option value="INPUT MANUAL" selected>Input Pajak Manual</option><option value="NON ASN">Non-ASN / Bukan Pegawai</option><option value="ASN I-II">ASN Golongan I–II</option><option value="ASN III">ASN Golongan III</option><option value="ASN IV/PEJABAT">ASN Golongan IV / Pejabat Negara</option></select></div>
     <div class="field"><label>Tarif PPh 21 (%)</label><input class="hpajak" value="" placeholder="Masukkan persen" inputmode="decimal"></div>
     <div class="honor-remove-wrap"><button class="btn-red" type="button" onclick="this.closest('.honor-row-v112').remove()">Hapus</button></div>
@@ -7992,7 +7990,7 @@ openHonorModalV79=function(id){
     <div class="modal-head"><div><h3>Buat Dokumen Honorarium</h3><p>${esc(k.nama_kegiatan)} • ${esc(bidangName(k.id_bidang))}</p></div><button class="btn-soft" onclick="document.getElementById('honorModalV79').classList.add('hidden')">Tutup</button></div>
     <input type="hidden" id="honorKegV79" value="${esc(id)}">
     <div class="honor-modal-info-v81"><div><span>ID Kegiatan</span><b>${esc(k.id_kegiatan)}</b></div><div><span>Jenis</span><b>${esc(k.jenis_non_pengadaan||'Honorarium')}</b></div><div><span>Nilai Perencanaan</span><b>${rupiah(k.jumlah)}</b></div><div><span>Nilai Honor</span><b>${rupiah(k.harga_satuan)} per ${esc(k.satuan||'Satuan')}</b></div></div>
-    <div class="honor-tax-note-v87"><b>Catatan:</b> Nilai honor mengikuti Harga Satuan Perencanaan dan tidak dapat diubah. Total volume penerima tidak boleh melebihi Volume Perencanaan.</div>
+    <div class="honor-tax-note-v87"><b>Catatan:</b> Nilai honor mengikuti Harga Satuan Perencanaan dan tidak dapat diubah. Total honor tidak boleh melebihi Nilai Perencanaan.</div>
     <div class="honor-modal-body-v81"><div class="honor-head-row-v81"><span>Daftar Penerima Honorarium</span><button class="btn-soft" type="button" onclick="document.getElementById('honorRowsV79').insertAdjacentHTML('beforeend',honorRowV112(kegiatanById(document.getElementById('honorKegV79').value)))">+ Tambah Penerima</button></div><div id="honorRowsV79" class="honor-rows-v92">${honorRowV112(k)}</div></div>
     <div class="modal-actions honor-actions-v81"><button class="btn-soft" onclick="document.getElementById('honorModalV79').classList.add('hidden')">Batal</button><button id="btnGenerateHonorV81" class="btn-green" onclick="generateHonorV112()">${latest?.url_pdf?'Buat Versi Baru':'Buat Dokumen Honorarium'}</button></div>
   </div>`;
@@ -8013,10 +8011,11 @@ async function generateHonorV112(){
     if(!volume||volume<=0){alert(`Volume penerima ke-${i+1} wajib diisi.`);return;}
     if(!plannedRate){alert('Nilai Honor belum tersedia dari Perencanaan.');return;}
     if(pajak<0||pajak>100){alert(`Tarif PPh 21 penerima ke-${i+1} harus 0–100%.`);return;}
-    const rowRate=plannedRate;
-    totalVolume+=volume; totalBruto+=volume*rowRate;
-    penerima.push({nama_penerima:nama,nik_npwp:nik,jabatan_peran:r.querySelector('.hperan')?.value||'',volume,satuan:k.satuan||'Orang/Kegiatan',tarif_honor:rowRate,kategori_pajak:kategori,jenis_pajak:'PPh 21',tarif_pajak:pajak,nilai_pajak:0});
+    totalVolume+=volume; totalBruto+=volume*plannedRate;
+    penerima.push({nama_penerima:nama,nik_npwp:nik,jabatan_peran:r.querySelector('.hperan')?.value||'',volume,satuan:k.satuan||'Orang/Kegiatan',tarif_honor:plannedRate,kategori_pajak:kategori,jenis_pajak:'PPh 21',tarif_pajak:pajak,nilai_pajak:0});
   }
+  // Volume pada setiap penerima adalah pengali honor penerima tersebut.
+  // Validasi utama menggunakan total bruto agar pembuatan versi baru tidak salah menghitung akumulasi volume.
   if(plannedTotal>0&&totalBruto>plannedTotal){alert(`Total honor ${rupiah(totalBruto)} melebihi Nilai Perencanaan ${rupiah(plannedTotal)}.`);return;}
   btn.dataset.busy='1';btn.disabled=true;btn.textContent='Memproses...';showLoading('Membuat dokumen honorarium...');
   try{const res=await apiPost({action:'generateHonorPdf',user:currentUser,data:{id_kegiatan:id,penerima}});if(!res.success)throw new Error(res.message||'Gagal membuat dokumen');document.getElementById('honorModalV79')?.classList.add('hidden');alert(res.message||'Dokumen berhasil dibuat');if(res.url_pdf)window.open(res.url_pdf,'_blank');syncDashboardSilentV111();}
@@ -8053,6 +8052,19 @@ renderDetailNonPengadaanV95=function(k){
 function isRealFinalV113(real){
   return !!real && ['FINAL','DISETUJUI','SELESAI','SAH'].includes(String(real.status||'').toUpperCase());
 }
+function latestNonRealV113_(idKegiatan){
+  const rows=(dashboard?.realisasi||[]).filter(r=>String(r.id_kegiatan)===String(idKegiatan)&&String(r.status||'').toUpperCase()!=='DIBATALKAN');
+  if(!rows.length) return null;
+  const finals=rows.filter(isRealFinalV113);
+  const source=finals.length?finals:rows;
+  return source.slice().sort((a,b)=>{
+    const ra=toNumber(a._row), rb=toNumber(b._row);
+    if(ra||rb) return rb-ra;
+    const da=new Date(a.tanggal_input||a.tanggal_realisasi||0).getTime()||0;
+    const db=new Date(b.tanggal_input||b.tanggal_realisasi||0).getTime()||0;
+    return db-da;
+  })[0]||null;
+}
 
 nonPipelineV103=function(k,n,docs,real){
   const up=s=>String(s||'').toUpperCase();
@@ -8064,14 +8076,15 @@ nonPipelineV103=function(k,n,docs,real){
   const hasRepair=latest.some(d=>['PERBAIKAN DOKUMEN','PERBAIKAN'].includes(up(d.status_verifikasi)));
   const waitingRepair=latest.some(d=>up(d.status_verifikasi)==='MENUNGGU VERIFIKASI PERBAIKAN DOKUMEN');
   const allValid=complete&&latest.every(d=>up(d.status_verifikasi)==='VALID DOKUMEN');
-  const realFinal=isRealFinalV113(real);
+  const latestReal=latestNonRealV113_(k.id_kegiatan)||real;
+  const realFinal=isRealFinalV113(latestReal);
   // Paket dianggap selesai berdasarkan kondisi nyata, tidak hanya bergantung pada status cache di PERENCANAAN.
-  const final=allValid&&realFinal;
+  const final=allValid&&(realFinal||up(k.status_pencairan)==='SELESAI');
   const stages=[
     {no:1,label:'Perencanaan Disetujui',state:approved?'done':''},
     {no:2,label:'Dokumen Honor Dibuat',state:generated?'done':''},
     {no:3,label:'Dokumen Wajib Diunggah',state:hasRepair?'repair':(complete?'done':(waitingRepair?'waiting':''))},
-    {no:4,label:'Pencatatan Realisasi',state:real?'done':(complete?'waiting':'')},
+    {no:4,label:'Pencatatan Realisasi',state:latestReal?'done':(complete?'waiting':'')},
     {no:5,label:'Verifikasi Dokumen',state:allValid?'done':(hasRepair?'repair':((complete||waitingRepair)?'waiting':''))},
     {no:6,label:'Selesai',state:final?'done':''}
   ];
@@ -8083,7 +8096,7 @@ renderDetailNonPengadaanV95=function(k){
   const result=__renderDetailNonV113Base.apply(this,arguments);
   const docs=(dashboard?.dokumenNonPengadaan||[]).filter(d=>String(d.id_kegiatan)===String(k.id_kegiatan));
   const latest=latestRequiredNonDocsV109(docs);
-  const real=(dashboard?.realisasi||[]).find(r=>String(r.id_kegiatan)===String(k.id_kegiatan)&&String(r.status||'').toUpperCase()!=='DIBATALKAN');
+  const real=latestNonRealV113_(k.id_kegiatan);
   const allValid=latest.length===2&&latest.every(d=>String(d.status_verifikasi||'').toUpperCase()==='VALID DOKUMEN');
   if(allValid&&isRealFinalV113(real)){
     k.status_pencairan='SELESAI';
@@ -8149,18 +8162,3 @@ honorRowV112=function(k){
     <div class="honor-remove-wrap"><button class="btn-red" type="button" onclick="this.closest('.honor-row-v112').remove()">Hapus</button></div>
   </div>`;
 };
-
-
-/* =========================================================
-   SIMPROV v114 - Sinkron honor dan finalisasi Non Pengadaan
-   ========================================================= */
-function syncHonorTotalV114(volumeInput){
-  const row=volumeInput?.closest('.honor-row-v112');
-  const honor=row?.querySelector('.htarif');
-  if(!honor)return;
-  const rate=toNumber(honor.dataset.rate)||0;
-  const vol=Math.max(0,toNumber(volumeInput.value)||0);
-  const total=rate*vol;
-  honor.value=total?Number(total).toLocaleString('id-ID'):'';
-  honor.dataset.value=String(total);
-}
