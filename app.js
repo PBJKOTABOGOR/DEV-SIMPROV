@@ -5900,7 +5900,7 @@ async function submitCatatBLV94(){
   if(!confirm('Catat realisasi dan tandai kegiatan SELESAI?')) return;
   showLoading('Mencatat Belanja Langsung...');
   try{
-    const r = await apiPost({action:'catatBelanjaLangsungV94', user:currentUser, id_kegiatan:id,
+    const r = await apiPost({action:'catatBelanjaLangsungV118', user:currentUser, id_kegiatan:id,
       nilai_realisasi:nilai, nama_penyedia:document.getElementById('blPenyediaV94')?.value || '',
       nomor_bukti:document.getElementById('blBuktiV94')?.value || '', keterangan:document.getElementById('blKetV94')?.value || ''});
     alert(r.message || (r.success ? 'Tercatat' : 'Gagal'));
@@ -6194,7 +6194,7 @@ async function submitCatatBLDetailV95(id){
   if(!confirm('Catat realisasi dan tandai paket SELESAI?')) return;
   showLoading('Mencatat Belanja Langsung...');
   try{
-    const r = await apiPost({action:'catatBelanjaLangsungV94', user:currentUser, id_kegiatan:id,
+    const r = await apiPost({action:'catatBelanjaLangsungV118', user:currentUser, id_kegiatan:id,
       nilai_realisasi:nilai, nama_penyedia:document.getElementById('blPenyediaV94')?.value || '',
       nomor_bukti:document.getElementById('blBuktiV94')?.value || '', keterangan:document.getElementById('blKetV94')?.value || ''});
     alert(r.message || (r.success ? 'Tercatat' : 'Gagal'));
@@ -6532,7 +6532,7 @@ async function submitCatatBLDetailV95(id){
   if(!confirm('Catat realisasi ' + rupiah(nilai) + ' dan tandai paket SELESAI?')) return;
   showLoading('Mencatat Belanja Langsung...');
   try{
-    const r = await apiPost({action:'catatBelanjaLangsungV94', user:currentUser, id_kegiatan:id,
+    const r = await apiPost({action:'catatBelanjaLangsungV118', user:currentUser, id_kegiatan:id,
       nilai_realisasi:nilai, nama_penyedia:document.getElementById('blPenyediaV94')?.value || '',
       nomor_bukti:document.getElementById('blBuktiV94')?.value || '', keterangan:document.getElementById('blKetV94')?.value || ''});
     alert(r.message || (r.success ? 'Tercatat' : 'Gagal'));
@@ -8272,7 +8272,7 @@ async function submitCatatBLDetailV117(id){
   if(!confirm('Catat realisasi '+rupiah(nilai)+'?'))return;
   showLoading('Menyimpan nilai realisasi...');
   try{
-    const r=await apiPost({action:'catatBelanjaLangsungV94',user:currentUser,id_kegiatan:id,nilai_realisasi:nilai,nama_penyedia:nama,nomor_bukti:'',keterangan:ket});
+    const r=await apiPost({action:'catatBelanjaLangsungV118',user:currentUser,id_kegiatan:id,nilai_realisasi:nilai,nama_penyedia:nama,nomor_bukti:'',keterangan:ket});
     if(!r.success)throw new Error(r.message||'Gagal mencatat realisasi');
     await loadDashboard(false);renderAll();alert(r.message||'Realisasi berhasil dicatat');
   }catch(e){alert(e.message||String(e));}finally{hideLoading();}
