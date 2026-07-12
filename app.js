@@ -6852,3 +6852,52 @@ async function downloadTemplateV101(idKegiatan, jenis){
     if(r.success&&r.url_file) window.open(r.url_file,'_blank');
   }catch(e){alert('Gagal: '+e.message);}finally{hideLoading();}
 }
+
+/* =========================================================
+   SIMPROV v102 - UI Struktur PPK dan Keterangan Non Pengadaan
+   ========================================================= */
+function ppkStructurePanelV102(){
+  const i=dashboard?.systemIdentity||{};
+  return `<section class="panel fade-up premium-panel ppk-structure-v102">
+    <div class="panel-title-row"><div><h3>Pejabat Penanda Tangan Komitmen</h3><p class="panel-sub">Nama pejabat diisi oleh Admin. Sistem otomatis menerapkan pejabat sesuai kelompok bidang.</p></div></div>
+    <div class="ppk-grid-v102">
+      <div class="field"><label>Ketua I</label><input id="ppkKetuaI" value="${esc(i.ketua_i||'')}" placeholder="Nama Ketua I"><small>Membidangi Penyiaran dan Pelayanan Media; Akomodasi, Konsumsi dan Pengarahan Massa; Kesehatan.</small></div>
+      <div class="field"><label>Ketua II</label><input id="ppkKetuaII" value="${esc(i.ketua_ii||'')}" placeholder="Nama Ketua II"><small>Membidangi Organisasi dan Hukum; Keamanan; Transportasi.</small></div>
+      <div class="field"><label>Ketua III</label><input id="ppkKetuaIII" value="${esc(i.ketua_iii||'')}" placeholder="Nama Ketua III"><small>Membidangi Pertandingan dan Perwasitan; Sarana dan Prasarana Pertandingan; Teknologi Informasi dan Komunikasi.</small></div>
+      <div class="field"><label>Sekretaris Umum</label><input id="ppkSekum" value="${esc(i.sekretaris_umum||'')}" placeholder="Nama Sekretaris Umum"><small>Membidangi Kerjasama dan Usaha; Pengadaan Barang dan Jasa.</small></div>
+    </div>
+    <div class="actions"><button onclick="savePpkStructureV102()">Simpan Struktur Pejabat</button></div>
+  </section>`;
+}
+async function savePpkStructureV102(){
+  showLoader('Menyimpan struktur pejabat...');
+  try{
+    const res=await apiPost({action:'savePpkStructureV102',user:currentUser,data:{
+      ketua_i:document.getElementById('ppkKetuaI')?.value||'',
+      ketua_ii:document.getElementById('ppkKetuaII')?.value||'',
+      ketua_iii:document.getElementById('ppkKetuaIII')?.value||'',
+      sekretaris_umum:document.getElementById('ppkSekum')?.value||''
+    }});
+    if(!res.success) throw new Error(res.message||'Gagal menyimpan');
+    await refreshData(false); alert(res.message);
+  }catch(e){ alert(e.message||e); } finally{ hideLoader(); }
+}
+const renderStrukturV102Base_ = renderStruktur;
+renderStruktur = function(){
+  renderStrukturV102Base_();
+  if(canManage()){
+    const area=document.getElementById('contentArea');
+    if(area && !area.querySelector('.ppk-structure-v102')) area.insertAdjacentHTML('afterbegin',ppkStructurePanelV102());
+  }
+};
+
+function syncNonPengadaanUiV102(){
+  const non=document.getElementById('kategoriPerencanaanV79')?.value==='NON PENGADAAN';
+  const box=document.getElementById('metodePreview');
+  if(non && box){
+    const jenis=document.getElementById('jenisNonPengadaanV79')?.value||'Honorarium';
+    box.innerHTML=`<div class="non-info-v102"><div><span>Kategori</span><strong>Non Pengadaan</strong></div><div><span>Jenis Non Pengadaan</span><strong>${esc(jenis)}</strong></div><p><b>Keterangan:</b> Non Pengadaan tidak menggunakan metode pemilihan. Setelah disetujui Verifikator, proses dilanjutkan pada menu <b>Pencatatan Non Pengadaan</b>.</p></div>`;
+  }
+}
+const syncNonPengadaanUiV102Base_=syncNonPengadaanUiV81;
+syncNonPengadaanUiV81=function(){ syncNonPengadaanUiV102Base_(); syncNonPengadaanUiV102(); };
