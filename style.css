@@ -2597,3 +2597,6 @@ tr:has(.per-file-revision) td{
 /* SIMPROV v101 */
 .template-meta-grid-v101{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:14px 0}
 @media(max-width:760px){.template-meta-grid-v101{grid-template-columns:1fr}}
+
+/* SIMPROV v102 - struktur pejabat & keterangan non pengadaan */
+.ppk-grid-v102{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.ppk-grid-v102 .field small{display:block;margin-top:7px;line-height:1.45;color:#60738b}.non-info-v102{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px}.non-info-v102>div{padding:12px 14px;border:1px solid #d8e8f5;border-radius:12px;background:#f8fbfe}.non-info-v102 span{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#718096;margin-bottom:4px}.non-info-v102 strong{font-size:14px;color:#0d4777}.non-info-v102 p{grid-column:1/-1;margin:0;padding:12px 14px;border-left:4px solid #149bd7;border-radius:10px;background:#f1f9fd;line-height:1.5;color:#334e68}.metode-grid+.doc-help-box{display:none!important}@media(max-width:760px){.ppk-grid-v102,.non-info-v102{grid-template-columns:1fr}}
