@@ -8190,3 +8190,90 @@ honorRowV112=function(k){
     <div class="honor-remove-wrap"><button class="btn-red" type="button" onclick="this.closest('.honor-row-v112').remove()">Hapus</button></div>
   </div>`;
 };
+
+/* =========================================================
+   SIMPROV v117 - Sinkron tampilan paket selesai & pipeline
+   Pencatatan Pengadaan
+   ========================================================= */
+function paketSudahSelesaiV117(k){
+  return String(getPencairanStatus(k.id_kegiatan)||k.status_pencairan||'').toUpperCase()==='SELESAI';
+}
+
+paketListHtmlV95 = function(list, opts){
+  const q=String(paketSearchV95||'').toLowerCase();
+  const filtered=list.filter(k=>!q||String(k.nama_kegiatan||'').toLowerCase().includes(q)||String(k.id_kegiatan||'').toLowerCase().includes(q)||bidangName(k.id_bidang).toLowerCase().includes(q)||paketStatusV95(k).toLowerCase().includes(q));
+  const rows=filtered.map(k=>{
+    const selesai=paketSudahSelesaiV117(k);
+    return `<tr class="paket-row-v95 ${selesai?'paket-row-selesai-v117':''}">
+      <td><a href="javascript:void(0)" onclick="bukaPaketV95('${esc(k.id_kegiatan)}')" class="paket-link-v95 ${selesai?'paket-link-selesai-v117':''}">${esc(k.nama_kegiatan)}</a> ${metodeBadgeV95(k)}</td>
+      <td>${selesai?'<span class="paket-status-selesai-v117">Paket Sudah Selesai</span>':esc(paketStatusV95(k))}</td>
+      <td>${esc(paketTanggalV95(k))}</td><td>${esc(bidangName(k.id_bidang))}</td>
+      <td><button class="btn-soft paket-buka-v95" onclick="bukaPaketV95('${esc(k.id_kegiatan)}')" type="button">${esc(opts.aksiLabel||'Buka Paket')}</button></td></tr>`;
+  }).join('');
+  const buatBtn=(!canManage()&&!isReviewer())?`<button onclick="buatPaketV95()" type="button" class="paket-buat-v95">+ Buat Paket</button>`:'';
+  return `<section class="panel fade-up premium-panel"><div class="panel-title-row"><div><h3>${esc(opts.judul)}</h3><p class="panel-sub">${opts.sub}</p></div><div class="action-group">${buatBtn}<button class="btn-refresh" onclick="refreshData()" type="button">Refresh Data</button></div></div>${opts.info||''}<div class="paket-toolbar-v95"><span>Tampilan <b id="paketCountV96">${filtered.length}</b> paket</span><input type="text" placeholder="Cari nama paket / bidang / status..." value="${esc(paketSearchV95)}" oninput="paketSearchV95=this.value;renderContent()"></div><div class="table-wrap"><table class="paket-table-v95"><thead><tr><th>Nama Paket</th><th>Status</th><th>Tanggal Buat</th><th>Bidang / Satuan Kerja</th><th>Aksi</th></tr></thead><tbody>${rows||'<tr><td colspan="5" class="empty">Belum ada paket.</td></tr>'}</tbody></table></div></section>`;
+};
+
+function pipelinePencatatanPengadaanV117(k, docs, real){
+  const required=dokumenKetentuanByMetode('BELANJA LANGSUNG');
+  const byKey={};
+  (docs||[]).forEach(d=>{byKey[dokKeyV94(d.jenis_dokumen)]=d;});
+  const picked=required.map(j=>byKey[dokKeyV94(j)]).filter(Boolean);
+  const complete=required.length>0&&picked.length===required.length&&picked.every(d=>d.url_file);
+  const repair=picked.some(d=>['PERBAIKAN','PERBAIKAN DOKUMEN'].includes(String(d.status_verifikasi||'').toUpperCase()));
+  const allValid=complete&&picked.every(d=>isDokValidV94(d));
+  const hasReal=!!real;
+  const final=paketSudahSelesaiV117(k);
+  const stages=[
+    {no:1,label:'Perencanaan Disetujui',state:String(k.status_perencanaan||'').toUpperCase()==='DISETUJUI'?'done':''},
+    {no:2,label:'Dokumen Wajib Diunggah',state:repair?'repair':(complete?'done':'')},
+    {no:3,label:'Pencatatan Realisasi',state:hasReal?'done':(complete?'waiting':'')},
+    {no:4,label:'Verifikasi Dokumen',state:allValid?'done':(repair?'repair':(complete?'waiting':''))},
+    {no:5,label:'Selesai',state:final?'done':((allValid&&hasReal)?'waiting':'')}
+  ];
+  return `<div class="pipeline-v103 pipeline-pgd-v117">${stages.map(x=>statusPipelineNonV104(x,x.state)).join('')}</div>`;
+}
+
+renderDetailPencatatanV95 = function(k){
+  const final=paketSudahSelesaiV117(k);
+  const approved=String(k.status_perencanaan||'').toUpperCase()==='DISETUJUI';
+  const isBidangSendiri=!canManage()&&!isReviewer()&&String(k.id_bidang)===String(currentUser?.id_bidang||'');
+  const jenisList=dokumenKetentuanByMetode('BELANJA LANGSUNG');
+  const docs=(dashboard?.dokumen||[]).filter(d=>String(d.id_kegiatan)===String(k.id_kegiatan));
+  const real=(dashboard?.realisasi||[]).find(r=>String(r.id_kegiatan)===String(k.id_kegiatan)&&String(r.status||'').toUpperCase()!=='DIBATALKAN');
+  const complete=jenisList.length>0&&jenisList.every(j=>docs.some(d=>dokKeyV94(d.jenis_dokumen)===dokKeyV94(j)&&d.url_file));
+  const pagu=toNumber(k.jumlah);
+  let catatHtml='';
+  if(final){
+    catatHtml=`<div class="selesai-banner-v96">✓ Paket sudah SELESAI dicatat.${real?` Nilai realisasi <b>${rupiah(real.nilai_realisasi)}</b>`:''}</div>`;
+  }else if(!approved){
+    catatHtml='<p class="empty">Perencanaan paket belum disetujui.</p>';
+  }else if(isBidangSendiri){
+    catatHtml=complete?`${penyediaDatalistV94()}<div class="form-grid"><div class="field"><label>Nama Penyedia / Toko *</label><input list="penyediaListV94" id="blPenyediaV94" placeholder="Nama penyedia"></div><div class="field"><label>Nilai Realisasi (Rp) *</label><input inputmode="numeric" id="blNilaiV94" data-max="${pagu}" oninput="onRupiahInputV96(this)" placeholder="Maks. ${rupiah(pagu)}"></div><div class="field"><label>Keterangan *</label><input id="blKetV94" placeholder="Uraian transaksi"></div></div><button onclick="submitCatatBLDetailV117('${esc(k.id_kegiatan)}')" type="button">Catat Realisasi</button>`:'<div class="notice-v103">Pencatatan realisasi terbuka setelah seluruh dokumen wajib diunggah.</div>';
+  }else if(isPBJVerifierV65()){
+    catatHtml=real?`<div class="notice-v103">Nilai realisasi tercatat: <b>${rupiah(real.nilai_realisasi)}</b>.</div>${!final?`<button class="btn-green" onclick="selesaikanBLV95('${esc(k.id_kegiatan)}')" type="button">Selesai Paket</button>`:''}`:'<p class="small">Menunggu pencatatan realisasi oleh User Bidang.</p>';
+  }else catatHtml='<p class="small">Menunggu proses oleh User Bidang dan Verifikator.</p>';
+
+  document.getElementById('contentArea').innerHTML=`${backBarV95(k,k.metode_pemilihan||'Belanja Langsung')}
+    <section class="panel fade-up premium-panel"><div class="panel-head"><div><h3>Tahapan Pencatatan Pengadaan</h3><p class="panel-sub">Proses dokumen, realisasi, pemeriksaan, dan penyelesaian ditampilkan secara berurutan.</p></div></div>${pipelinePencatatanPengadaanV117(k,docs,real)}</section>
+    <section class="panel fade-up premium-panel"><div class="panel-head"><div><h3>Dokumen Wajib</h3></div></div>${dokumenTableV95(k,jenisList,'PGD')}</section>
+    <section class="panel fade-up premium-panel"><div class="panel-head"><div><h3>Pencatatan Realisasi</h3></div></div>${catatHtml}</section>`;
+};
+
+async function submitCatatBLDetailV117(id){
+  const nilai=valRupiahV96('blNilaiV94');
+  const nama=(document.getElementById('blPenyediaV94')?.value||'').trim();
+  const ket=(document.getElementById('blKetV94')?.value||'').trim();
+  const k=kegiatanById(id), max=toNumber(k?.jumlah||0);
+  if(!nama){alert('Nama penyedia wajib diisi.');return;}
+  if(nilai<=0){alert('Nilai realisasi wajib diisi.');return;}
+  if(max>0&&nilai>max){alert('Nilai realisasi tidak boleh melebihi '+rupiah(max)+'.');return;}
+  if(!ket){alert('Keterangan wajib diisi.');return;}
+  if(!confirm('Catat realisasi '+rupiah(nilai)+'?'))return;
+  showLoading('Menyimpan nilai realisasi...');
+  try{
+    const r=await apiPost({action:'catatBelanjaLangsungV94',user:currentUser,id_kegiatan:id,nilai_realisasi:nilai,nama_penyedia:nama,nomor_bukti:'',keterangan:ket});
+    if(!r.success)throw new Error(r.message||'Gagal mencatat realisasi');
+    await loadDashboard(false);renderAll();alert(r.message||'Realisasi berhasil dicatat');
+  }catch(e){alert(e.message||String(e));}finally{hideLoading();}
+}
