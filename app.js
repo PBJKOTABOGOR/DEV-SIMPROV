@@ -7068,3 +7068,136 @@ dokumenTableV95 = function(k, jenisList, ctx){
   const tombol=bolehUpload?`<div class="dok-upload-bar-v96 hidden" id="dokUploadBarV96"><span id="dokUploadInfoV96"></span><button onclick="uploadSemuaDokV96('${esc(k.id_kegiatan)}')" type="button">Upload Semua File</button></div>`:'';
   return `${tombol}<div class="table-wrap"><table class="dok-table-v96"><thead><tr><th>Jenis Dokumen</th><th>File</th><th>Status</th>${bolehUpload?'<th>Upload File</th>':''}<th>Catatan</th><th>Riwayat</th><th>Verifikasi</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 };
+
+
+/* =========================================================
+   SIMPROV v105 - Pipeline Pencatatan Pengadaan, HPS Rinci,
+   form penyedia/realisasi, template kuitansi, dan upload PL
+   ========================================================= */
+function isOwnerBidangV105(k){
+  return !isReviewer() && !canManage() && String(k?.id_bidang||'')===String(currentUser?.id_bidang||'');
+}
+function blPipelineV105(k, docs, real){
+  const up=s=>String(s||'').toUpperCase();
+  const required=dokumenKetentuanByMetode('BELANJA LANGSUNG');
+  const mapped=required.map(j=>(docs||[]).find(d=>dokKeyV94(d.jenis_dokumen)===dokKeyV94(j))).filter(Boolean);
+  const uploaded=mapped.length>=required.length;
+  const repair=mapped.some(d=>['PERBAIKAN','PERBAIKAN DOKUMEN','MENUNGGU VERIFIKASI PERBAIKAN DOKUMEN'].includes(up(d.status_verifikasi)));
+  const allValid=uploaded && mapped.every(d=>isDokValidV94(d));
+  const waiting=uploaded && !allValid && !repair;
+  const final=up(k.status_pencairan)==='SELESAI'||!!real;
+  const stages=[
+    {no:1,label:'Perencanaan Disetujui',state:up(k.status_perencanaan)==='DISETUJUI'?'done':''},
+    {no:2,label:'Dokumen Diunggah',state:repair?'repair':(uploaded?'done':'')},
+    {no:3,label:'Verifikasi Dokumen',state:allValid?'done':(waiting?'waiting':(repair?'repair':''))},
+    {no:4,label:'Pencatatan Realisasi',state:real?'done':''},
+    {no:5,label:'Selesai',state:final?'done':''}
+  ];
+  return `<div class="pipeline-v103">${stages.map(x=>statusPipelineNonV104(x,x.state)).join('')}</div>`;
+}
+function getBlFormV105(k, docs, real){
+  const approved=String(k.status_perencanaan||'').toUpperCase()==='DISETUJUI';
+  const final=String(k.status_pencairan||'').toUpperCase()==='SELESAI';
+  const required=dokumenKetentuanByMetode('BELANJA LANGSUNG');
+  const uploadedCount=required.filter(j=>(docs||[]).some(d=>dokKeyV94(d.jenis_dokumen)===dokKeyV94(j)&&d.url_file)).length;
+  const owner=isOwnerBidangV105(k);
+  if(!approved) return '<p class="empty">Perencanaan belum disetujui.</p>';
+  if(final) return `<div class="selesai-banner-v96">✓ Paket sudah selesai.${real?` Nilai realisasi <b>${rupiah(real.nilai_realisasi)}</b>`:''}</div>`;
+  if(uploadedCount<required.length) return `<div class="notice-v103">Lengkapi dokumen terlebih dahulu (${uploadedCount}/${required.length} terunggah).</div>`;
+  if(!owner) return '<p class="small">Pencatatan realisasi dilakukan oleh User Bidang.</p>';
+  return `${penyediaDatalistV94()}<div class="form-grid">
+    <div class="field"><label>Nama Penyedia / Toko *</label><input list="penyediaListV94" id="blPenyediaV94" placeholder="Nama penyedia"></div>
+    <div class="field"><label>Nilai Realisasi (Rp) *</label><input inputmode="numeric" id="blNilaiV94" data-max="${toNumber(k.jumlah)}" oninput="onRupiahInputV96(this)" placeholder="Maks. ${rupiah(k.jumlah)}"></div>
+    <div class="field span-2"><label>Keterangan *</label><input type="text" id="blKetV94" placeholder="Uraian transaksi"></div>
+  </div>
+  <div class="action-group"><button onclick="submitCatatBLDetailV95('${esc(k.id_kegiatan)}')" type="button">Catat Realisasi</button>
+  <button class="btn-soft" onclick="downloadKuitansiV105('${esc(k.id_kegiatan)}')" type="button">Download Template Kuitansi</button></div>`;
+}
+renderDetailPencatatanV95=function(k){
+  const docs=(dashboard?.dokumen||[]).filter(d=>String(d.id_kegiatan)===String(k.id_kegiatan));
+  const real=(dashboard?.realisasi||[]).find(r=>String(r.id_kegiatan)===String(k.id_kegiatan));
+  const jenisList=dokumenKetentuanByMetode('BELANJA LANGSUNG');
+  document.getElementById('contentArea').innerHTML=`${backBarV95(k,k.metode_pemilihan||'Belanja Langsung')}
+    <section class="panel fade-up premium-panel"><div class="panel-head"><div><h3>Tahapan Pencatatan Pengadaan</h3></div></div>${blPipelineV105(k,docs,real)}</section>
+    <section class="panel fade-up premium-panel"><div class="panel-head"><div><h3>Dokumen Wajib</h3></div></div>${dokumenTableV95(k,jenisList,'PGD')}</section>
+    <section class="panel fade-up premium-panel"><div class="panel-head"><div><h3>Pencatatan Realisasi</h3></div></div>${getBlFormV105(k,docs,real)}</section>`;
+  const b=document.querySelector('#dokUploadBarV96 button'); if(b)b.textContent='Upload Semua File';
+};
+async function downloadKuitansiV105(id){
+  const nama=document.getElementById('blPenyediaV94')?.value.trim()||'';
+  const nilai=valRupiahV96('blNilaiV94');
+  const ket=document.getElementById('blKetV94')?.value.trim()||'';
+  if(!nama||nilai<=0||!ket){alert('Isi Nama Penyedia, Nilai Realisasi, dan Keterangan terlebih dahulu.');return;}
+  showLoading('Membuat template kuitansi...');
+  try{
+    const r=await apiPost({action:'generateDokPengadaanV96',user:currentUser,id_kegiatan:id,jenis:'KUITANSI',nama_penyedia:nama,nilai:nilai,keterangan:ket});
+    alert(r.message||(r.success?'Template berhasil dibuat':'Gagal membuat template'));
+    if(r.success&&r.url)window.open(r.url,'_blank');
+  }catch(e){alert('Gagal: '+e.message);}finally{hideLoading();}
+}
+
+function hpsRowsHtmlV105(k,p){
+  const raw=String(p?.spesifikasi_teknis||'').startsWith('[HPSJSON]')?String(p.spesifikasi_teknis).slice(9):'';
+  let rows=[]; try{rows=raw?JSON.parse(raw):[]}catch(e){}
+  if(!Array.isArray(rows)||!rows.length) rows=[{uraian:k.nama_kegiatan||'',satuan:k.satuan||'',vol:toNumber(k.volume)||1,harga:Math.round((toNumber(p?.nilai_hps)||toNumber(k.jumlah))/(toNumber(k.volume)||1)),pajak:0,keterangan:''}];
+  return rows.map((r,i)=>`<tr class="hps-row-v105">
+    <td><input class="hps-uraian-v105" value="${esc(r.uraian||'')}"></td>
+    <td><input class="hps-satuan-v105" value="${esc(r.satuan||'')}"></td>
+    <td><input class="hps-vol-v105" inputmode="decimal" value="${esc(String(r.vol||1))}" oninput="hitungHpsV105()"></td>
+    <td><input class="hps-harga-v105" inputmode="numeric" value="${Number(r.harga||0).toLocaleString('id-ID')}" oninput="onRupiahInputV96(this);hitungHpsV105()"></td>
+    <td><input class="hps-pajak-v105" inputmode="decimal" value="${esc(String(r.pajak||0))}" oninput="hitungHpsV105()"></td>
+    <td class="hps-total-v105">${rupiah((Number(r.vol)||0)*(Number(r.harga)||0)*(1+(Number(r.pajak)||0)/100))}</td>
+    <td><input class="hps-ket-v105" value="${esc(r.keterangan||'')}"></td>
+    <td><button class="btn-red" type="button" onclick="this.closest('tr').remove();hitungHpsV105()">Hapus</button></td>
+  </tr>`).join('');
+}
+function addHpsRowV105(){
+  document.querySelector('#hpsBodyV105')?.insertAdjacentHTML('beforeend',hpsRowsHtmlV105({nama_kegiatan:'',satuan:'',volume:1,jumlah:0},{spesifikasi_teknis:'[HPSJSON][]'}));hitungHpsV105();
+}
+function collectHpsV105(){
+  return [...document.querySelectorAll('.hps-row-v105')].map(tr=>({
+    uraian:tr.querySelector('.hps-uraian-v105')?.value||'',satuan:tr.querySelector('.hps-satuan-v105')?.value||'',
+    vol:parseFloat((tr.querySelector('.hps-vol-v105')?.value||'0').replace(',','.'))||0,
+    harga:toNumber(tr.querySelector('.hps-harga-v105')?.value||0),pajak:parseFloat((tr.querySelector('.hps-pajak-v105')?.value||'0').replace(',','.'))||0,
+    keterangan:tr.querySelector('.hps-ket-v105')?.value||''
+  }));
+}
+function hitungHpsV105(){
+  let total=0; document.querySelectorAll('.hps-row-v105').forEach(tr=>{const v=parseFloat((tr.querySelector('.hps-vol-v105')?.value||'0').replace(',','.'))||0,h=toNumber(tr.querySelector('.hps-harga-v105')?.value||0),p=parseFloat((tr.querySelector('.hps-pajak-v105')?.value||'0').replace(',','.'))||0,t=v*h*(1+p/100);total+=t;const c=tr.querySelector('.hps-total-v105');if(c)c.textContent=rupiah(t);});
+  const el=document.getElementById('hpsTotalV105'); if(el)el.textContent=rupiah(total); return Math.round(total);
+}
+
+renderDetailPengadaanLangsungV95=function(k){
+  const state=tahapanStateFeV94(k), final=String(k.status_pencairan||'').toUpperCase()==='SELESAI', approved=String(k.status_perencanaan||'').toUpperCase()==='DISETUJUI';
+  const info=kontrakInfoFeV94(k), pagu=toNumber(k.jumlah), tender=metodeKegiatanV94(k)==='TENDER MANUAL';
+  const proc=(dashboard?.prosesPengadaanV96||[]).find(x=>String(x.id_kegiatan)===String(k.id_kegiatan))||{};
+  const owner=isOwnerBidangV105(k), editable=(owner||isSuperAdminV65())&&!final;
+  let nextIdx=state.findIndex(t=>t.status!=='SELESAI');
+  const tahapHtml=approved?state.map((t,i)=>tahapDetailHtmlV94(k,t,i===nextIdx&&!final)).join(''):'<p class="empty">Perencanaan belum disetujui.</p>';
+  const card=approved?`<section class="panel fade-up premium-panel"><div class="panel-head"><div><h3>Penyedia, Realisasi &amp; HPS</h3></div></div>${penyediaDatalistV94()}
+    <div class="form-grid"><div class="field"><label>Nama Penyedia Terpilih</label><input list="penyediaListV94" id="plPenyediaUtamaV96" value="${esc(info.penyedia)}" ${editable?'':'readonly'}></div>
+    <div class="field"><label>Nilai Realisasi / Kontrak (Rp)</label><input inputmode="numeric" id="plNilaiRealisasiV96" data-max="${pagu}" oninput="onRupiahInputV96(this)" value="${info.nilai?Number(info.nilai).toLocaleString('id-ID'):''}" ${editable?'':'readonly'}></div></div>
+    <div class="hps-box-v105"><div class="panel-title-row"><div><h4>Rincian HPS</h4></div>${editable?'<button class="btn-soft" type="button" onclick="addHpsRowV105()">+ Tambah Baris</button>':''}</div>
+    <div class="table-wrap"><table class="hps-table-v105"><thead><tr><th>Jenis Barang/Jasa</th><th>Satuan</th><th>Vol</th><th>Harga/Biaya</th><th>Pajak (%)</th><th>Total</th><th>Keterangan</th><th>Aksi</th></tr></thead><tbody id="hpsBodyV105">${hpsRowsHtmlV105(k,proc)}</tbody></table></div>
+    <div class="hps-grand-v105">TOTAL NILAI HPS <b id="hpsTotalV105">${rupiah(toNumber(proc.nilai_hps)||pagu)}</b></div></div>
+    ${editable?`<button onclick="simpanPenyediaNilaiPLV105('${esc(k.id_kegiatan)}')" type="button">Simpan Penyedia, Realisasi &amp; HPS</button>`:''}
+    <div class="tpl-bar-v96"><b>Data template dokumen</b><div class="template-meta-grid-v101"><div class="field"><label>Nomor Dokumen</label><input id="tplNomorV101"></div><div class="field"><label>Pejabat yang Menandatangani</label><input id="tplPejabatV101"></div><div class="field"><label>Nama Penyedia</label><input id="tplPenyediaV101" value="${esc(info.penyedia)}"></div></div><div class="tpl-btns-v96"><button class="btn-soft" onclick="downloadTemplateV105('${esc(k.id_kegiatan)}','SPESIFIKASI DAN HPS')">Spesifikasi &amp; HPS</button><button class="btn-soft" onclick="downloadTemplateV105('${esc(k.id_kegiatan)}','${tender?'SURAT PERJANJIAN':'SPK'}')">${tender?'Surat Perjanjian':'SPK'}</button><button class="btn-soft" onclick="downloadTemplateV105('${esc(k.id_kegiatan)}','BA PEMERIKSAAN')">BA Pemeriksaan</button><button class="btn-soft" onclick="downloadTemplateV105('${esc(k.id_kegiatan)}','BA SERAH TERIMA PENYEDIA')">BAST Penyedia</button><button class="btn-soft" onclick="downloadTemplateV105('${esc(k.id_kegiatan)}','BA SERAH TERIMA KETUA UMUM')">BAST Ketua Umum</button></div></div>
+  </section>`:'';
+  document.getElementById('contentArea').innerHTML=`${backBarV95(k,(k.metode_pemilihan||'Pengadaan Langsung'))}${card}<section class="panel fade-up premium-panel pl-card-v94">${stepperHtmlV94(k,state)}${tahapHtml}</section>`;
+  setTimeout(hitungHpsV105,0);
+};
+async function simpanPenyediaNilaiPLV105(id){
+  const nama=document.getElementById('plPenyediaUtamaV96')?.value.trim()||'', nilai=valRupiahV96('plNilaiRealisasiV96'), rows=collectHpsV105(), hps=hitungHpsV105();
+  if(!nama){alert('Nama penyedia wajib diisi.');return;} if(hps<=0){alert('Rincian HPS wajib diisi.');return;} if(nilai<=0){alert('Nilai realisasi/kontrak wajib diisi.');return;}
+  showLoading('Menyimpan penyedia, realisasi, dan HPS...');
+  try{const k=kegiatanById(id)||{};const r=await apiPost({action:'saveProsesPengadaanV96',user:currentUser,data:{id_kegiatan:id,jalur_proses:metodeKegiatanV94(k)==='TENDER MANUAL'?'TENDER':'PENGADAAN LANGSUNG',nama_penyedia_snapshot:nama,nilai_hps:hps,nilai_kontrak:nilai,nilai_realisasi:nilai,spesifikasi_teknis:'[HPSJSON]'+JSON.stringify(rows)}});alert(r.message||(r.success?'Tersimpan':'Gagal'));if(r.success){await loadDashboard(false);renderAll();}}
+  catch(e){alert('Gagal: '+e.message);}finally{hideLoading();}
+}
+async function downloadTemplateV105(id,jenis){
+  const nomor=document.getElementById('tplNomorV101')?.value.trim()||'', pejabat=document.getElementById('tplPejabatV101')?.value.trim()||'', penyedia=document.getElementById('tplPenyediaV101')?.value.trim()||'';
+  if(!nomor||!pejabat||!penyedia){alert('Isi Nomor Dokumen, Pejabat Penandatangan, dan Nama Penyedia terlebih dahulu.');return;}
+  const hps=hitungHpsV105();
+  showLoading('Membuat template dokumen...');
+  try{const r=await apiPost({action:'generateProcurementTemplateV101',user:currentUser,data:{id_kegiatan:id,jenis_template:jenis,nomor_dokumen:nomor,pejabat_penandatangan:pejabat,nama_penyedia:penyedia,nilai_hps:hps}});alert(r.message||'');if(r.success&&r.url_file)window.open(r.url_file,'_blank');}
+  catch(e){alert('Gagal: '+e.message);}finally{hideLoading();}
+}
