@@ -2627,3 +2627,13 @@ tr:has(.per-file-revision) td{
 
 /* SIMPROV v105 */
 .hps-box-v105{margin:16px 0;padding:14px;border:1px solid #d7e5f3;border-radius:14px;background:#fbfdff}.hps-table-v105{min-width:1100px}.hps-table-v105 input{width:100%;min-width:80px}.hps-table-v105 th:nth-child(1){min-width:260px}.hps-table-v105 th:nth-child(2){min-width:130px}.hps-table-v105 th:nth-child(3){width:80px}.hps-table-v105 th:nth-child(4){min-width:150px}.hps-table-v105 th:nth-child(5){width:95px}.hps-table-v105 th:nth-child(6){min-width:160px}.hps-table-v105 th:nth-child(7){min-width:220px}.hps-grand-v105{text-align:right;padding:14px 6px;font-size:16px}.hps-grand-v105 b{display:inline-block;min-width:180px;margin-left:20px;color:#0b4f86}.pipeline-v103 .pipe-step-v103.waiting{background:#e8f3ff;border-color:#8fc7ff;color:#0b5f9d}.pipeline-v103 .pipe-step-v103.repair{background:#fff0f0;border-color:#ffaaaa;color:#b51f1f}
+
+/* SIMPROV v107 - Nilai honor tidak dapat diedit */
+.honor-row-v87 .htarif[readonly],
+.honor-row-v87 .htarif[aria-readonly="true"]{
+  background:#eef6ff !important;
+  color:#0d4779 !important;
+  cursor:not-allowed !important;
+  pointer-events:none !important;
+  user-select:none !important;
+}
