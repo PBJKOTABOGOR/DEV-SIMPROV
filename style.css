@@ -2642,3 +2642,10 @@ tr:has(.per-file-revision) td{
 .honor-row-v112{display:grid;grid-template-columns:1.15fr 1fr 1.1fr .45fr 1fr 1fr 1.05fr .72fr auto;gap:10px;align-items:end}
 .realisasi-verif-actions-v112{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
 @media(max-width:1100px){.honor-row-v112{grid-template-columns:repeat(2,minmax(0,1fr))}.honor-remove-wrap{grid-column:span 2}}
+
+/* SIMPROV v117 */
+.paket-row-selesai-v117{border-left:4px solid #28a745!important;background:linear-gradient(90deg,#effcf3 0%,#fff 55%)!important}
+.paket-link-selesai-v117{color:#18833a!important;font-weight:800}
+.paket-status-selesai-v117{display:inline-flex;padding:5px 10px;border-radius:999px;background:#dcf8e5;color:#167239;font-weight:800;font-size:12px;border:1px solid #bdecca}
+.pipeline-pgd-v117{grid-template-columns:repeat(5,minmax(165px,1fr))}
+@media(max-width:800px){.pipeline-pgd-v117{grid-template-columns:repeat(5,minmax(150px,1fr));overflow-x:auto}}
