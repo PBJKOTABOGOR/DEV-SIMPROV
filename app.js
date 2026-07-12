@@ -7007,7 +7007,7 @@ renderDetailNonPengadaanV95=function(k){
   if(!approved) catatHtml='<p class="empty">Perencanaan belum DISETUJUI Verifikator.</p>';
   else if(final) catatHtml=`<div class="selesai-banner-v96">✓ Paket sudah SELESAI dicatat.${real?` Nilai realisasi <b>${rupiah(real.nilai_realisasi)}</b>`:''}</div>`;
   else if(uploadedCount<2) catatHtml='<div class="notice-v103">Upload terlebih dahulu Tanda Terima dan Bukti Potong Pajak sebelum mengisi realisasi.</div>';
-  else if(isBidangSendiri){ const netto=toNumber(n?.total_netto)||0; catatHtml=`<div class="form-grid"><div class="field"><label>Pihak / Penerima</label><input type="text" id="npPihakV96" value="" placeholder="Nama pihak penerima"></div><div class="field"><label>Nilai Realisasi Setelah Pajak (Rp)</label><input inputmode="numeric" id="npNilaiV96" value="${netto?Number(netto).toLocaleString('id-ID'):''}" data-value="${netto}" readonly></div><div class="field span-2"><label>Keterangan</label><input type="text" id="npKetV96"></div></div><button onclick="submitCatatNonV96('${esc(k.id_kegiatan)}')" type="button">Catat Realisasi</button><p class="small">Nilai realisasi menggunakan total netto setelah potongan pajak.</p>`; }
+  else if(isBidangSendiri){ const bruto=toNumber(n?.total_bruto)||toNumber(k.jumlah)||0; catatHtml=`<div class="form-grid"><div class="field"><label>Pihak / Penerima</label><input type="text" id="npPihakV96" value="" placeholder="Nama pihak penerima"></div><div class="field"><label>Nilai Realisasi (Rp)</label><input inputmode="numeric" id="npNilaiV96" value="${bruto?Number(bruto).toLocaleString('id-ID'):''}" data-value="${bruto}"></div><div class="field span-2"><label>Keterangan</label><input type="text" id="npKetV96"></div></div><button onclick="submitCatatNonV96('${esc(k.id_kegiatan)}')" type="button">Catat Realisasi</button><p class="small">Nilai realisasi dicatat berdasarkan nilai bruto sebelum potongan pajak dan tidak boleh melebihi nilai perencanaan.</p>`; }
   else catatHtml='<p class="small">Pencatatan dilakukan User Bidang pemilik kegiatan setelah dokumen diunggah.</p>';
   document.getElementById('contentArea').innerHTML=`${backBarV95(k,k.jenis_non_pengadaan||'Non Pengadaan')}<section class="panel fade-up premium-panel"><div class="panel-head"><div><h3>Tahapan Pencatatan Non Pengadaan</h3><p class="panel-sub">Selesaikan tahapan secara berurutan.</p></div></div>${nonPipelineV103(k,n,docs,real)}</section><section class="panel fade-up premium-panel"><div class="panel-head"><div><h3>Ringkasan Paket Non Pengadaan</h3></div></div>${ringkas}${honorBtn}</section><section class="panel fade-up premium-panel"><div class="panel-head"><div><h3>Dokumen Wajib</h3><p class="panel-sub">Pilih kedua file, kemudian klik Upload Semua File.</p></div></div>${dokumenTableV95(k,['Tanda Terima','Bukti Potong Pajak'],'NON')}</section><section class="panel fade-up premium-panel"><div class="panel-head"><div><h3>Pencatatan Realisasi</h3><p class="panel-sub">Tahap ini terbuka setelah kedua dokumen wajib diunggah.</p></div></div>${catatHtml}</section><div id="honorModalV79" class="modal hidden"></div>`;
   const upBtn=document.querySelector('#dokUploadBarV96 button'); if(upBtn) upBtn.textContent='Upload Semua File';
@@ -7591,11 +7591,11 @@ renderDetailNonPengadaanV95=function(k){
     const panel=[...document.querySelectorAll('#contentArea section.panel')].find(s=>s.querySelector('h3')?.textContent.trim()==='Pencatatan Realisasi');
     if(panel){
       const n=(typeof latestNonV79==='function')?latestNonV79(k.id_kegiatan):null;
-      const netto=toNumber(n?.total_netto)||toNumber(k.jumlah)||0;
+      const bruto=toNumber(n?.total_bruto)||toNumber(k.jumlah)||0;
       const isOwner=!canManage()&&!isReviewer()&&String(k.id_bidang)===String(currentUser?.id_bidang||'');
       const content=panel.querySelector('.panel-head')?.nextElementSibling;
       if(isOwner && content && !document.getElementById('npNilaiV96')){
-        content.outerHTML=`<div><div class="form-grid"><div class="field"><label>Pihak / Penerima</label><input type="text" id="npPihakV96" value=""></div><div class="field"><label>Nilai Realisasi Setelah Pajak (Rp)</label><input inputmode="numeric" id="npNilaiV96" value="${Number(netto).toLocaleString('id-ID')}" data-value="${netto}" readonly></div><div class="field span-2"><label>Keterangan</label><input type="text" id="npKetV96"></div></div><button onclick="submitCatatNonV96('${esc(k.id_kegiatan)}')" type="button">Catat Realisasi</button></div>`;
+        content.outerHTML=`<div><div class="form-grid"><div class="field"><label>Pihak / Penerima</label><input type="text" id="npPihakV96" value=""></div><div class="field"><label>Nilai Realisasi (Rp)</label><input inputmode="numeric" id="npNilaiV96" value="${Number(netto).toLocaleString('id-ID')}" data-value="${netto}" readonly></div><div class="field span-2"><label>Keterangan</label><input type="text" id="npKetV96"></div></div><button onclick="submitCatatNonV96('${esc(k.id_kegiatan)}')" type="button">Catat Realisasi</button></div>`;
       }
     }
   }
@@ -7688,8 +7688,8 @@ renderDetailNonPengadaanV95=function(k){
       catatHtml+=`<div class="form-grid"><div class="field"><label>Nilai Realisasi Hasil Pemeriksaan (Rp)</label><input inputmode="numeric" id="npKoreksiNilaiV110" value="${Number(toNumber(real.nilai_realisasi)).toLocaleString('id-ID')}" data-value="${toNumber(real.nilai_realisasi)}" oninput="onRupiahInputV96(this)"></div><div class="field span-2"><label>Catatan Koreksi</label><input type="text" id="npKoreksiCatatanV110" placeholder="Wajib diisi apabila nilai diubah"></div></div><button class="btn-orange" onclick="koreksiRealisasiNonV110('${esc(k.id_kegiatan)}')" type="button">Simpan Koreksi Nilai</button><p class="small">Setiap perubahan nilai oleh Verifikator disimpan dalam riwayat pemeriksaan.</p>`;
     }
   } else if(isOwner){
-    const netto=toNumber(n?.total_netto)||toNumber(k.jumlah)||0;
-    catatHtml=`<div class="form-grid"><div class="field"><label>Pihak / Penerima</label><input type="text" id="npPihakV96" value="" placeholder="Nama pihak penerima"></div><div class="field"><label>Nilai Realisasi (Rp)</label><input inputmode="numeric" id="npNilaiV96" value="${netto?Number(netto).toLocaleString('id-ID'):''}" data-value="${netto}" oninput="onRupiahInputV96(this)"></div><div class="field span-2"><label>Keterangan</label><input type="text" id="npKetV96"></div></div><button onclick="submitCatatNonV96('${esc(k.id_kegiatan)}')" type="button">Catat Realisasi</button><p class="small">Nilai realisasi akan diperiksa oleh Verifikator bersama dokumen. Nilai tidak boleh melebihi nilai perencanaan.</p>`;
+    const bruto=toNumber(n?.total_bruto)||toNumber(k.jumlah)||0;
+    catatHtml=`<div class="form-grid"><div class="field"><label>Pihak / Penerima</label><input type="text" id="npPihakV96" value="" placeholder="Nama pihak penerima"></div><div class="field"><label>Nilai Realisasi (Rp)</label><input inputmode="numeric" id="npNilaiV96" value="${bruto?Number(bruto).toLocaleString('id-ID'):''}" data-value="${bruto}" data-max="${toNumber(k.jumlah)}" oninput="onRupiahInputV96(this)"></div><div class="field span-2"><label>Keterangan</label><input type="text" id="npKetV96"></div></div><button onclick="submitCatatNonV96('${esc(k.id_kegiatan)}')" type="button">Catat Realisasi</button><p class="small">Nilai realisasi akan diperiksa oleh Verifikator bersama dokumen. Nilai tidak boleh melebihi nilai perencanaan.</p>`;
   } else catatHtml='<p class="small">Nilai realisasi dicatat oleh User Bidang setelah seluruh dokumen selesai diunggah.</p>';
   document.getElementById('contentArea').innerHTML=`${backBarV95(k,k.jenis_non_pengadaan||'Non Pengadaan')}<section class="panel fade-up premium-panel"><div class="panel-head"><div><h3>Tahapan Pencatatan Non Pengadaan</h3><p class="panel-sub">Proses dokumen, realisasi, dan pemeriksaan ditampilkan secara berurutan.</p></div></div>${nonPipelineV103(k,n,docs,real)}</section><section class="panel fade-up premium-panel"><div class="panel-head"><div><h3>Ringkasan Paket Non Pengadaan</h3></div></div>${ringkas}${honorBtn}</section><section class="panel fade-up premium-panel"><div class="panel-head"><div><h3>Dokumen Wajib</h3><p class="panel-sub">Unggah Tanda Terima dan Bukti Potong Pajak.</p></div></div>${dokumenTableV95(k,['Tanda Terima','Bukti Potong Pajak'],'NON')}</section><section class="panel fade-up premium-panel"><div class="panel-head"><div><h3>Pencatatan Realisasi</h3><p class="panel-sub">Nilai dapat dicatat setelah seluruh dokumen diunggah dan diperiksa oleh Verifikator pada tahap berikutnya.</p></div></div>${catatHtml}</section><div id="honorModalV79" class="modal hidden"></div>`;
   const upBtn=document.querySelector('#dokUploadBarV96 button'); if(upBtn) upBtn.textContent='Upload Semua File';
@@ -8277,3 +8277,52 @@ async function submitCatatBLDetailV117(id){
     await loadDashboard(false);renderAll();alert(r.message||'Realisasi berhasil dicatat');
   }catch(e){alert(e.message||String(e));}finally{hideLoading();}
 }
+
+
+/* =========================================================
+   SIMPROV v119 - Verifikasi nilai realisasi Pencatatan Pengadaan
+   dan realisasi Non Pengadaan memakai nilai bruto
+   ========================================================= */
+function isRealFinalPengadaanV119(real){
+  return !!real && ['FINAL','DISETUJUI','SELESAI','SAH'].includes(String(real.status||'').toUpperCase());
+}
+async function verifikasiRealisasiPengadaanV119(id, keputusan){
+  const nilai=valRupiahV96('pgKoreksiNilaiV119');
+  const catatan=(document.getElementById('pgKoreksiCatatanV119')?.value||'').trim();
+  if(keputusan==='PERBAIKI'&&nilai<=0){alert('Nilai hasil perbaikan wajib diisi.');return;}
+  if(keputusan==='PERBAIKI'&&!catatan){alert('Catatan perbaikan wajib diisi.');return;}
+  if(!confirm(keputusan==='SETUJUI'?'Setujui nilai realisasi ini?':'Simpan koreksi nilai realisasi ini?'))return;
+  showLoading(keputusan==='SETUJUI'?'Menyetujui nilai realisasi...':'Menyimpan koreksi nilai...');
+  try{
+    const r=await apiPost({action:'verifikasiRealisasiPengadaanV119',user:currentUser,id_kegiatan:id,keputusan,nilai_realisasi:nilai,catatan});
+    if(!r.success)throw new Error(r.message||'Gagal memeriksa nilai realisasi');
+    await loadDashboard(false);renderAll();alert(r.message||'Nilai realisasi berhasil diperiksa');
+  }catch(e){alert(e.message||String(e));}finally{hideLoading();}
+}
+
+const __renderDetailPencatatanV119Base=renderDetailPencatatanV95;
+renderDetailPencatatanV95=function(k){
+  __renderDetailPencatatanV119Base.apply(this,arguments);
+  if(!(isPBJVerifierV65()||canManage()))return;
+  const final=paketSudahSelesaiV117(k);
+  const real=(dashboard?.realisasi||[]).find(r=>String(r.id_kegiatan)===String(k.id_kegiatan)&&String(r.status||'').toUpperCase()!=='DIBATALKAN');
+  const panels=[...document.querySelectorAll('#contentArea section.panel')];
+  const target=panels.find(x=>x.querySelector('h3')?.textContent.trim()==='Pencatatan Realisasi');
+  if(!target||!real||final)return;
+  const nilai=toNumber(real.nilai_realisasi);
+  if(isRealFinalPengadaanV119(real)){
+    target.innerHTML=`<div class="panel-head"><div><h3>Pencatatan Realisasi</h3></div></div><div class="notice-v103">Nilai realisasi telah disetujui: <b>${rupiah(nilai)}</b>.</div><button class="btn-green" onclick="selesaikanBLV95('${esc(k.id_kegiatan)}')" type="button">Selesai Paket</button>`;
+  }else{
+    target.innerHTML=`<div class="panel-head"><div><h3>Pencatatan Realisasi</h3><p class="panel-sub">Periksa nilai yang dicatat oleh User Bidang. Nilai dapat disetujui atau dikoreksi oleh Verifikator.</p></div></div>
+      <div class="notice-v103">Nilai realisasi tercatat: <b>${rupiah(nilai)}</b>.</div>
+      <div class="form-grid"><div class="field"><label>Nilai Realisasi Hasil Pemeriksaan (Rp)</label><input inputmode="numeric" id="pgKoreksiNilaiV119" value="${Number(nilai).toLocaleString('id-ID')}" data-max="${toNumber(k.jumlah)}" oninput="onRupiahInputV96(this)"></div><div class="field span-2"><label>Catatan Koreksi</label><input id="pgKoreksiCatatanV119" placeholder="Wajib diisi apabila nilai diperbaiki"></div></div>
+      <div class="realisasi-verif-actions-v112"><button class="btn-green" type="button" onclick="verifikasiRealisasiPengadaanV119('${esc(k.id_kegiatan)}','SETUJUI')">Setujui Nilai Realisasi</button><button class="btn-orange" type="button" onclick="verifikasiRealisasiPengadaanV119('${esc(k.id_kegiatan)}','PERBAIKI')">Perbaiki Nilai Realisasi</button></div>`;
+  }
+};
+
+const __pipelinePencatatanPengadaanV119Base=pipelinePencatatanPengadaanV117;
+pipelinePencatatanPengadaanV117=function(k,docs,real){
+  const html=__pipelinePencatatanPengadaanV119Base(k,docs,real);
+  if(!real||isRealFinalPengadaanV119(real))return html;
+  return html.replace('Pencatatan Realisasi</', 'Pencatatan Realisasi</');
+};
