@@ -2600,3 +2600,17 @@ tr:has(.per-file-revision) td{
 
 /* SIMPROV v102 - struktur pejabat & keterangan non pengadaan */
 .ppk-grid-v102{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.ppk-grid-v102 .field small{display:block;margin-top:7px;line-height:1.45;color:#60738b}.non-info-v102{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px}.non-info-v102>div{padding:12px 14px;border:1px solid #d8e8f5;border-radius:12px;background:#f8fbfe}.non-info-v102 span{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#718096;margin-bottom:4px}.non-info-v102 strong{font-size:14px;color:#0d4777}.non-info-v102 p{grid-column:1/-1;margin:0;padding:12px 14px;border-left:4px solid #149bd7;border-radius:10px;background:#f1f9fd;line-height:1.5;color:#334e68}.metode-grid+.doc-help-box{display:none!important}@media(max-width:760px){.ppk-grid-v102,.non-info-v102{grid-template-columns:1fr}}
+
+
+/* SIMPROV v103 */
+.honor-row-v103{grid-template-columns:1.3fr 1.15fr 1.2fr .55fr 1fr 1fr 1.15fr .75fr auto!important}
+.honor-row-v103 .htarif[readonly]{background:#edf6ff;color:#0b477d;font-weight:800;cursor:not-allowed}
+.pipeline-v103{display:grid;grid-template-columns:repeat(6,minmax(120px,1fr));gap:10px;overflow-x:auto;padding:8px 2px}
+.pipe-step-v103{display:flex;align-items:center;gap:9px;border:1px solid #d7e4ef;border-radius:12px;background:#fff;padding:12px;color:#66788c;min-width:145px}
+.pipe-step-v103 span{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:#e8eef5;font-weight:800}
+.pipe-step-v103.done{background:#effbf4;border-color:#bfe8ce;color:#166b3a}.pipe-step-v103.done span{background:#27ae60;color:#fff}
+.notice-v103{padding:14px 16px;border:1px solid #f4d27c;background:#fff9e8;border-radius:12px;color:#805700;font-weight:700}
+.dok-table-v96 input[type=file]{width:100%!important;min-width:280px!important;max-width:none!important;color:#334e68}
+.dok-table-v96 th:nth-child(4),.dok-table-v96 td:nth-child(4){min-width:320px!important;width:34%!important}
+.dok-upload-bar-v96 button{white-space:nowrap}
+@media(max-width:900px){.honor-row-v103{grid-template-columns:1fr 1fr!important}.pipeline-v103{grid-template-columns:repeat(6,170px)}.dok-table-v96 input[type=file]{min-width:220px!important}}
