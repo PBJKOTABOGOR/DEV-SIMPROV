@@ -6859,26 +6859,37 @@ function ppkStructurePanelV102(){
   return `<section class="panel fade-up premium-panel ppk-structure-v102">
     <div class="panel-title-row"><div><h3>Pejabat Penanda Tangan Komitmen</h3><p class="panel-sub">Nama pejabat diisi oleh Admin. Sistem otomatis menerapkan pejabat sesuai kelompok bidang.</p></div></div>
     <div class="ppk-grid-v102">
+      <div class="field"><label>Ketua Harian</label><input id="ppkKetuaHarian" value="${esc(i.ketua_harian||'')}" placeholder="Nama Ketua Harian"><small>Membidangi Kesekretariatan.</small></div>
       <div class="field"><label>Ketua I</label><input id="ppkKetuaI" value="${esc(i.ketua_i||'')}" placeholder="Nama Ketua I"><small>Membidangi Penyiaran dan Pelayanan Media; Akomodasi, Konsumsi dan Pengarahan Massa; Kesehatan.</small></div>
       <div class="field"><label>Ketua II</label><input id="ppkKetuaII" value="${esc(i.ketua_ii||'')}" placeholder="Nama Ketua II"><small>Membidangi Organisasi dan Hukum; Keamanan; Transportasi.</small></div>
       <div class="field"><label>Ketua III</label><input id="ppkKetuaIII" value="${esc(i.ketua_iii||'')}" placeholder="Nama Ketua III"><small>Membidangi Pertandingan dan Perwasitan; Sarana dan Prasarana Pertandingan; Teknologi Informasi dan Komunikasi.</small></div>
       <div class="field"><label>Sekretaris Umum</label><input id="ppkSekum" value="${esc(i.sekretaris_umum||'')}" placeholder="Nama Sekretaris Umum"><small>Membidangi Kerjasama dan Usaha; Pengadaan Barang dan Jasa.</small></div>
     </div>
-    <div class="actions"><button onclick="savePpkStructureV102()">Simpan Struktur Pejabat</button></div>
+    <div class="actions"><button id="btnSavePpkStructureV102" type="button" onclick="savePpkStructureV102()">Simpan Struktur Pejabat</button></div>
   </section>`;
 }
 async function savePpkStructureV102(){
-  showLoader('Menyimpan struktur pejabat...');
+  const btn=document.getElementById('btnSavePpkStructureV102');
+  if(btn?.dataset.busy==='1') return;
+  if(btn){btn.dataset.busy='1';btn.disabled=true;btn.textContent='Menyimpan...';}
+  showLoading('Menyimpan struktur pejabat...');
   try{
     const res=await apiPost({action:'savePpkStructureV102',user:currentUser,data:{
+      ketua_harian:document.getElementById('ppkKetuaHarian')?.value||'',
       ketua_i:document.getElementById('ppkKetuaI')?.value||'',
       ketua_ii:document.getElementById('ppkKetuaII')?.value||'',
       ketua_iii:document.getElementById('ppkKetuaIII')?.value||'',
       sekretaris_umum:document.getElementById('ppkSekum')?.value||''
     }});
     if(!res.success) throw new Error(res.message||'Gagal menyimpan');
-    await refreshData(false); alert(res.message);
-  }catch(e){ alert(e.message||e); } finally{ hideLoader(); }
+    await loadDashboard(false);
+    renderAll();
+    alert(res.message||'Struktur pejabat berhasil disimpan');
+  }catch(e){ alert(e.message||String(e)); }
+  finally{
+    hideLoading();
+    if(btn){btn.dataset.busy='0';btn.disabled=false;btn.textContent='Simpan Struktur Pejabat';}
+  }
 }
 const renderStrukturV102Base_ = renderStruktur;
 renderStruktur = function(){
@@ -8078,18 +8089,30 @@ nonPipelineV103=function(k,n,docs,real){
   const allValid=complete&&latest.every(d=>up(d.status_verifikasi)==='VALID DOKUMEN');
   const latestReal=latestNonRealV113_(k.id_kegiatan)||real;
   const realFinal=isRealFinalV113(latestReal);
-  // Paket dianggap selesai berdasarkan kondisi nyata, tidak hanya bergantung pada status cache di PERENCANAAN.
-  const final=allValid&&(realFinal||up(k.status_pencairan)==='SELESAI');
+  const final=up(k.status_pencairan)==='SELESAI'||up(n?.status)==='SELESAI';
   const stages=[
     {no:1,label:'Perencanaan Disetujui',state:approved?'done':''},
     {no:2,label:'Dokumen Honor Dibuat',state:generated?'done':''},
     {no:3,label:'Dokumen Wajib Diunggah',state:hasRepair?'repair':(complete?'done':(waitingRepair?'waiting':''))},
     {no:4,label:'Pencatatan Realisasi',state:latestReal?'done':(complete?'waiting':'')},
-    {no:5,label:'Verifikasi Dokumen',state:allValid?'done':(hasRepair?'repair':((complete||waitingRepair)?'waiting':''))},
-    {no:6,label:'Selesai',state:final?'done':''}
+    {no:5,label:'Verifikasi Dokumen',state:(allValid&&realFinal)?'done':(hasRepair?'repair':((complete||waitingRepair||latestReal)?'waiting':''))},
+    {no:6,label:'Selesai',state:final?'done':((allValid&&realFinal)?'waiting':'')}
   ];
   return `<div class="pipeline-v103">${stages.map(x=>statusPipelineNonV104(x,x.state)).join('')}</div>`;
 };
+
+async function selesaikanPaketNonPengadaanV116(id){
+  if(!confirm('Selesaikan paket Non Pengadaan ini? Setelah selesai, pipeline akan ditutup.')) return;
+  showLoading('Menyelesaikan paket Non Pengadaan...');
+  try{
+    const r=await apiPost({action:'selesaikanPaketNonPengadaanV116',user:currentUser,id_kegiatan:id});
+    if(!r.success) throw new Error(r.message||'Gagal menyelesaikan paket');
+    await loadDashboard(false);
+    renderAll();
+    alert(r.message||'Paket Non Pengadaan selesai');
+  }catch(e){alert(e.message||String(e));}
+  finally{hideLoading();}
+}
 
 const __renderDetailNonV113Base=renderDetailNonPengadaanV95;
 renderDetailNonPengadaanV95=function(k){
@@ -8097,11 +8120,16 @@ renderDetailNonPengadaanV95=function(k){
   const docs=(dashboard?.dokumenNonPengadaan||[]).filter(d=>String(d.id_kegiatan)===String(k.id_kegiatan));
   const latest=latestRequiredNonDocsV109(docs);
   const real=latestNonRealV113_(k.id_kegiatan);
-  const allValid=latest.length===2&&latest.every(d=>String(d.status_verifikasi||'').toUpperCase()==='VALID DOKUMEN');
-  if(allValid&&isRealFinalV113(real)){
-    k.status_pencairan='SELESAI';
+  const n=(typeof latestNonV79==='function')?latestNonV79(k.id_kegiatan):null;
+  const allValid=latest.length===2&&latest.every(d=>String(d.status_verifikasi||'').toUpperCase()==='VALID DOKUMEN'&&!!d.url_file);
+  const realFinal=isRealFinalV113(real);
+  const final=String(k.status_pencairan||'').toUpperCase()==='SELESAI'||String(n?.status||'').toUpperCase()==='SELESAI';
+  if(final){
     const badgeEl=document.querySelector('.package-topbar-v95 .status-badge-v60, .detail-backbar-v95 .status-badge-v60');
     if(badgeEl){badgeEl.className='status-badge-v60 status-green';badgeEl.textContent='SELESAI';}
+  }else if(isVerifierV77()&&allValid&&realFinal&&!document.getElementById('finalizeNonPackageV116')){
+    const area=document.getElementById('contentArea');
+    if(area) area.insertAdjacentHTML('beforeend',`<section id="finalizeNonPackageV116" class="panel fade-up premium-panel"><div class="panel-head"><div><h3>Finalisasi Paket</h3><p class="panel-sub">Dokumen dan nilai realisasi telah valid. Klik tombol di bawah untuk menutup paket.</p></div></div><button class="btn-green" type="button" onclick="selesaikanPaketNonPengadaanV116('${esc(k.id_kegiatan)}')">Selesai Paket</button></section>`);
   }
   return result;
 };
