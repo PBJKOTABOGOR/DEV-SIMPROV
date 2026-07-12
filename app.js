@@ -6985,7 +6985,7 @@ renderDetailNonPengadaanV95=function(k){
   const n=(typeof latestNonV79==='function')?latestNonV79(k.id_kegiatan):null;
   const docs=(dashboard?.dokumenNonPengadaan||[]).filter(d=>String(d.id_kegiatan)===String(k.id_kegiatan));
   const real=(dashboard?.realisasi||[]).find(r=>String(r.id_kegiatan)===String(k.id_kegiatan));
-  const final=String(k.status_pencairan||'').toUpperCase()==='SELESAI';
+  let final=String(k.status_pencairan||'').toUpperCase()==='SELESAI';
   const approved=String(k.status_perencanaan||'').toUpperCase()==='DISETUJUI';
   const isBidangSendiri=!canManage()&&!isReviewer()&&String(k.id_bidang)===String(currentUser?.id_bidang||'');
   const isHonor=String(k.jenis_non_pengadaan||'Honorarium').toUpperCase().includes('HONOR');
@@ -7216,7 +7216,7 @@ function honorRowV79(){
     <div class="field"><label>Nama Penerima</label><input class="hnama" placeholder="Nama lengkap" autocomplete="off"></div>
     <div class="field"><label>NIK/NPWP (16 Digit)</label><input class="hnik" inputmode="numeric" maxlength="16" placeholder="16 digit angka" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,16)"></div>
     <div class="field"><label>Jabatan / Peran</label><input class="hperan" placeholder="Contoh: Peserta"></div>
-    <div class="field"><label>Volume</label><input class="hvol" inputmode="numeric" value="1" min="1" step="1" oninput="this.value=this.value.replace(/[^0-9]/g,'')"></div>
+    <div class="field"><label>Volume</label><input class="hvol" inputmode="numeric" value="1" min="1" step="1" oninput="this.value=this.value.replace(/[^0-9]/g,'');syncHonorTotalV114(this)"></div>
     <div class="field"><label>Satuan</label><input class="hsatuan" value="${esc(k?.satuan||'Orang/Kegiatan')}" readonly></div>
     <div class="field"><label>Nilai Honor per Satuan</label><input class="htarif" value="${rate?Number(rate).toLocaleString('id-ID'):''}" data-value="${rate}" readonly></div>
     <div class="field"><label>Kategori</label><select class="hkategori" onchange="syncHonorTaxV87(this)"><option value="NON ASN">Non-ASN / Bukan Pegawai</option><option value="ASN I-II">ASN Golongan I–II</option><option value="ASN III">ASN Golongan III</option><option value="ASN IV/PEJABAT">ASN Golongan IV / Pejabat Negara</option><option value="INPUT MANUAL">Input Pajak Manual</option></select></div>
@@ -7665,6 +7665,8 @@ renderDetailNonPengadaanV95=function(k){
   const isHonor=String(k.jenis_non_pengadaan||'Honorarium').toUpperCase().includes('HONOR');
   const complete=latest.length===2&&latest.every(d=>d.url_file);
   const allValid=complete&&latest.every(d=>String(d.status_verifikasi||'').toUpperCase()==='VALID DOKUMEN');
+  final=final||(allValid&&isRealFinalV113(real));
+  if(final) k.status_pencairan='SELESAI';
   const ringkas=`<div class="non-stat-grid-v96"><div class="non-stat-v96"><small>Jenis</small><b>${esc(k.jenis_non_pengadaan||'Non Pengadaan')}</b></div><div class="non-stat-v96"><small>Nilai Perencanaan</small><b>${rupiah(k.jumlah)}</b></div><div class="non-stat-v96"><small>Total Bruto</small><b>${rupiah(n?.total_bruto||0)}</b></div><div class="non-stat-v96"><small>Total Pajak</small><b>${rupiah(n?.total_pajak||0)}</b></div><div class="non-stat-v96"><small>Total Netto</small><b>${rupiah(n?.total_netto||0)}</b></div><div class="non-stat-v96"><small>Dokumen PDF</small><b>${n?.url_pdf?`<a href="${esc(n.url_pdf)}" target="_blank">Buka PDF v${esc(String(n.versi_pdf||1))}</a>`:'Belum dibuat'}</b></div></div>`;
   const honorBtn=isHonor&&isOwner&&approved&&!final?`<button onclick="openHonorModalV79('${esc(k.id_kegiatan)}')" type="button">${n?.url_pdf?'Buat Ulang Dokumen Honor':'Buat Dokumen Honorarium'}</button>`:'';
   let catatHtml='';
@@ -7961,9 +7963,9 @@ function honorRowV112(k){
     <div class="field"><label>Nama Penerima</label><input class="hnama" placeholder="Nama lengkap" autocomplete="off"></div>
     <div class="field"><label>NIK/NPWP (16 Digit)</label><input class="hnik" inputmode="numeric" maxlength="16" placeholder="16 digit angka" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,16)"></div>
     <div class="field"><label>Jabatan / Peran</label><input class="hperan" placeholder="Contoh: Peserta"></div>
-    <div class="field"><label>Volume</label><input class="hvol" inputmode="numeric" value="1" min="1" step="1" oninput="this.value=this.value.replace(/[^0-9]/g,'')"></div>
+    <div class="field"><label>Volume</label><input class="hvol" inputmode="numeric" value="1" min="1" step="1" oninput="this.value=this.value.replace(/[^0-9]/g,'');syncHonorTotalV114(this)"></div>
     <div class="field"><label>Satuan</label><input class="hsatuan" value="${esc(k.satuan||'Orang/Kegiatan')}" readonly></div>
-    <div class="field"><label>Nilai Honor per Satuan</label><input class="htarif" value="${rate?Number(rate).toLocaleString('id-ID'):''}" data-value="${rate}" readonly tabindex="-1"></div>
+    <div class="field"><label>Nilai Honor</label><input class="htarif" value="${rate?Number(rate).toLocaleString('id-ID'):''}" data-rate="${rate}" data-value="${rate}" readonly tabindex="-1"></div>
     <div class="field"><label>Kategori</label><select class="hkategori" onchange="syncHonorTaxV112(this)"><option value="INPUT MANUAL" selected>Input Pajak Manual</option><option value="NON ASN">Non-ASN / Bukan Pegawai</option><option value="ASN I-II">ASN Golongan I–II</option><option value="ASN III">ASN Golongan III</option><option value="ASN IV/PEJABAT">ASN Golongan IV / Pejabat Negara</option></select></div>
     <div class="field"><label>Tarif PPh 21 (%)</label><input class="hpajak" value="" placeholder="Masukkan persen" inputmode="decimal"></div>
     <div class="honor-remove-wrap"><button class="btn-red" type="button" onclick="this.closest('.honor-row-v112').remove()">Hapus</button></div>
@@ -8011,10 +8013,9 @@ async function generateHonorV112(){
     if(!volume||volume<=0){alert(`Volume penerima ke-${i+1} wajib diisi.`);return;}
     if(!plannedRate){alert('Nilai Honor belum tersedia dari Perencanaan.');return;}
     if(pajak<0||pajak>100){alert(`Tarif PPh 21 penerima ke-${i+1} harus 0–100%.`);return;}
-    totalVolume+=volume; totalBruto+=volume*plannedRate;
-    penerima.push({nama_penerima:nama,nik_npwp:nik,jabatan_peran:r.querySelector('.hperan')?.value||'',volume,satuan:k.satuan||'Orang/Kegiatan',tarif_honor:plannedRate,kategori_pajak:kategori,jenis_pajak:'PPh 21',tarif_pajak:pajak,nilai_pajak:0});
+    totalVolume+=volume; totalBruto+=volume*rowRate;
+    penerima.push({nama_penerima:nama,nik_npwp:nik,jabatan_peran:r.querySelector('.hperan')?.value||'',volume,satuan:k.satuan||'Orang/Kegiatan',tarif_honor:rowRate,kategori_pajak:kategori,jenis_pajak:'PPh 21',tarif_pajak:pajak,nilai_pajak:0});
   }
-  if(plannedVolume>0&&totalVolume>plannedVolume){alert(`Total volume penerima (${totalVolume}) melebihi Volume Perencanaan (${plannedVolume}).`);return;}
   if(plannedTotal>0&&totalBruto>plannedTotal){alert(`Total honor ${rupiah(totalBruto)} melebihi Nilai Perencanaan ${rupiah(plannedTotal)}.`);return;}
   btn.dataset.busy='1';btn.disabled=true;btn.textContent='Memproses...';showLoading('Membuat dokumen honorarium...');
   try{const res=await apiPost({action:'generateHonorPdf',user:currentUser,data:{id_kegiatan:id,penerima}});if(!res.success)throw new Error(res.message||'Gagal membuat dokumen');document.getElementById('honorModalV79')?.classList.add('hidden');alert(res.message||'Dokumen berhasil dibuat');if(res.url_pdf)window.open(res.url_pdf,'_blank');syncDashboardSilentV111();}
@@ -8147,3 +8148,18 @@ honorRowV112=function(k){
     <div class="honor-remove-wrap"><button class="btn-red" type="button" onclick="this.closest('.honor-row-v112').remove()">Hapus</button></div>
   </div>`;
 };
+
+
+/* =========================================================
+   SIMPROV v114 - Sinkron honor dan finalisasi Non Pengadaan
+   ========================================================= */
+function syncHonorTotalV114(volumeInput){
+  const row=volumeInput?.closest('.honor-row-v112');
+  const honor=row?.querySelector('.htarif');
+  if(!honor)return;
+  const rate=toNumber(honor.dataset.rate)||0;
+  const vol=Math.max(0,toNumber(volumeInput.value)||0);
+  const total=rate*vol;
+  honor.value=total?Number(total).toLocaleString('id-ID'):'';
+  honor.dataset.value=String(total);
+}
