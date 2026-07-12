@@ -2614,3 +2614,12 @@ tr:has(.per-file-revision) td{
 .dok-table-v96 th:nth-child(4),.dok-table-v96 td:nth-child(4){min-width:320px!important;width:34%!important}
 .dok-upload-bar-v96 button{white-space:nowrap}
 @media(max-width:900px){.honor-row-v103{grid-template-columns:1fr 1fr!important}.pipeline-v103{grid-template-columns:repeat(6,170px)}.dok-table-v96 input[type=file]{min-width:220px!important}}
+
+/* SIMPROV v104 */
+.pipe-step-v103.waiting{border-color:#8fc8ff;background:#eef7ff;color:#0b5b9a}
+.pipe-step-v103.waiting span{background:#168bd2;color:#fff}
+.pipe-step-v103.repair{border-color:#ffb7b7;background:#fff0f0;color:#a82727}
+.pipe-step-v103.repair span{background:#e94b4b;color:#fff}
+.dok-table-v96 input[type="file"]{min-width:260px;max-width:100%}
+.dok-table-v96 th:nth-child(2),.dok-table-v96 td:nth-child(2){min-width:190px}
+.dok-table-v96 th:nth-child(4),.dok-table-v96 td:nth-child(4){min-width:280px}
