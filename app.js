@@ -7268,3 +7268,272 @@ uploadSemuaDokV96=async function(idKegiatan){
   // Paksa sinkronisasi terbaru agar Choose File hilang setelah upload berhasil.
   try{await loadDashboard(false);renderAll();}catch(e){}
 };
+
+/* =========================================================
+   SIMPROV v107 - Penguncian Nilai Honor dan Cache Bust
+   ========================================================= */
+function lockHonorRateV107(){
+  const modal=document.getElementById('honorModalV79');
+  const k=honorPlannedV106();
+  const rate=toNumber(k?.harga_satuan)||0;
+  modal?.querySelectorAll('.honor-row-v87 .htarif').forEach(function(el){
+    el.value=rate?Number(rate).toLocaleString('id-ID'):'';
+    el.dataset.value=String(rate);
+    el.readOnly=true;
+    el.setAttribute('readonly','readonly');
+    el.setAttribute('aria-readonly','true');
+    el.tabIndex=-1;
+    el.oninput=function(){ this.value=rate?Number(rate).toLocaleString('id-ID'):''; this.dataset.value=String(rate); };
+    el.onfocus=function(){ this.blur(); };
+  });
+}
+
+const openHonorModalV107Base=openHonorModalV79;
+openHonorModalV79=function(id){
+  const result=openHonorModalV107Base(id);
+  setTimeout(lockHonorRateV107,0);
+  return result;
+};
+
+const honorRowV107Base=honorRowV79;
+honorRowV79=function(){
+  const html=honorRowV107Base();
+  setTimeout(lockHonorRateV107,0);
+  return html;
+};
+
+/* =========================================================
+   SIMPROV v108 (frontend)
+   1. Non Pengadaan: nilai realisasi non-honor bisa diisi manual; syarat
+      dokumen lengkap ditampilkan sebagai checklist yang jelas.
+   2. Upload perbaikan kini benar-benar mengganti file: baris berstatus
+      PERBAIKAN dirutekan ke action revisi (bukan upload baru yang ditolak).
+   3. Verifikasi massal: ceklis banyak dokumen lalu Valid/Perbaikan sekaligus.
+   4. Pengadaan Langsung: Nilai Realisasi terkunci sampai SEMUA dokumen
+      tahapan terupload.
+   5. Pajak pada rincian HPS MEMOTONG total (input 11 -> total -11%).
+   6-9. Field Pelaksana & Lingkup Pekerjaan untuk template; Surat
+      Perjanjian (Tender) kini valid; template lebih cepat (tanpa reload).
+   ========================================================= */
+
+(function(){const s=document.createElement('style');s.textContent=`
+.bulk-verif-bar-v108{display:flex;align-items:center;gap:10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:10px 14px;margin-bottom:10px;flex-wrap:wrap}
+.bulk-verif-bar-v108 b{color:#166534}
+.dok-cek-v108{width:17px;height:17px;cursor:pointer}
+.hint-lock-v108{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:8px 12px;font-size:12.5px;color:#713f12;margin:6px 0}
+.cek-list-v108{margin:8px 0;font-size:13px}
+.cek-list-v108 span{display:inline-block;margin-right:14px}
+.cek-list-v108 .ok{color:#166534;font-weight:700}.cek-list-v108 .no{color:#b91c1c;font-weight:700}
+.hps-grand-net-v105{font-size:12.5px;color:#475569;margin-top:4px}`;document.head.appendChild(s);})();
+
+/* ---------- (5) Pajak MEMOTONG total HPS ---------- */
+hitungHpsV105=function(){
+  let bruto=0,pajak=0;
+  document.querySelectorAll('.hps-row-v105').forEach(tr=>{
+    const v=parseFloat((tr.querySelector('.hps-vol-v105')?.value||'0').replace(',','.'))||0;
+    const h=toNumber(tr.querySelector('.hps-harga-v105')?.value||0);
+    const p=parseFloat((tr.querySelector('.hps-pajak-v105')?.value||'0').replace(',','.'))||0;
+    const b=v*h, pot=Math.round(b*p/100), t=b-pot;
+    bruto+=b; pajak+=pot;
+    const c=tr.querySelector('.hps-total-v105'); if(c)c.textContent=rupiah(t);
+  });
+  const total=bruto-pajak;
+  const el=document.getElementById('hpsTotalV105');
+  if(el){el.textContent=rupiah(total);
+    let net=document.getElementById('hpsNetInfoV108');
+    if(!net){net=document.createElement('div');net.id='hpsNetInfoV108';net.className='hps-grand-net-v105';el.closest('.hps-grand-v105')?.appendChild(net);}
+    net.textContent='Bruto '+rupiah(bruto)+' - Pajak '+rupiah(pajak)+' = Total setelah dipotong pajak';}
+  return Math.round(total);
+};
+const __hpsRowsHtmlV108Base=hpsRowsHtmlV105;
+hpsRowsHtmlV105=function(k,p){
+  return __hpsRowsHtmlV108Base(k,p).replace(/class="hps-total-v105">[^<]*</g,'class="hps-total-v105">-<');
+};
+
+/* ---------- (2)(3) Tabel dokumen: id revisi + ceklis verifikasi massal ---------- */
+dokumenTableV95=function(k,jenisList,ctx){
+  ctx=ctx||'PGD';
+  const isNon=ctx==='NON';
+  const docs=isNon?(dashboard?.dokumenNonPengadaan||[]).filter(d=>String(d.id_kegiatan)===String(k.id_kegiatan)):(dashboard?.dokumen||[]).filter(d=>String(d.id_kegiatan)===String(k.id_kegiatan));
+  const bolehUpload=!canManage()&&!isReviewer()&&String(k.id_bidang)===String(currentUser?.id_bidang||'')&&String(k.status_perencanaan||'').toUpperCase()==='DISETUJUI';
+  const verifier=isPBJVerifierV65();
+  let adaPending=false;
+  const rows=jenisList.map(j=>{
+    const d=docs.find(x=>dokKeyV94(x.jenis_dokumen)===dokKeyV94(j));
+    const st=String(d?.status_verifikasi||'').toUpperCase();
+    const valid=d&&(isNon?st==='VALID DOKUMEN':isDokValidV94(d));
+    const repair=d&&['PERBAIKAN DOKUMEN','PERBAIKAN'].includes(st);
+    const waitingRepair=d&&st==='MENUNGGU VERIFIKASI PERBAIKAN DOKUMEN';
+    const canChoose=bolehUpload&&(!d||repair);
+    const idd=d?(isNon?d.id_dokumen_non:d.id_dokumen):'';
+    const bisaVerif=d&&verifier&&!valid&&!repair;
+    if(bisaVerif)adaPending=true;
+    let aksi='-';
+    if(bisaVerif) aksi=`<button class="btn-soft" onclick="verifDokV96('${esc(idd)}','VALID','${ctx}')" type="button">Valid</button> <button class="btn-red" onclick="verifDokV96('${esc(idd)}','PERBAIKAN','${ctx}')" type="button">Perbaikan</button>`;
+    const cekCell=verifier?`<td>${bisaVerif?`<input type="checkbox" class="dok-cek-v108" data-idd="${esc(idd)}" data-ctx="${ctx}" onchange="updateBulkBarV108()">`:'-'}</td>`:'';
+    const uploadCell=canChoose?`<input type="file" class="dok-file-v96" data-jenis="${esc(j)}" data-ctx="${ctx}" data-idd="${esc(idd)}" data-repair="${repair?'1':'0'}" onchange="this.closest('tr').classList.toggle('siap-upload-v96',this.files.length>0);tampilkanTombolUploadV96()">`:(d?`<span class="muted kecil-v96">${repair?'Upload ulang tersedia':(waitingRepair?'Menunggu verifikasi perbaikan':'Sudah diupload')}</span>`:'<span class="muted kecil-v96">-</span>');
+    const history=d?`<button class="btn-mini btn-detail" onclick="${isNon?`openNonHistoryV104('${esc(d.id_dokumen_non)}')`:`openDocStatusModal('${esc(d.id_dokumen)}')`}" type="button">Riwayat</button>`:'-';
+    return `<tr>${cekCell}<td>${esc(j)}</td><td>${d?`<a href="${esc(d.url_file)}" target="_blank">${esc(d.nama_file||'Buka File')}</a>`:'<span class="muted">Belum diupload</span>'}</td><td>${d?badge(d.status_verifikasi||'MENUNGGU'):'-'}</td>${bolehUpload?`<td>${uploadCell}</td>`:''}<td>${d?esc(d.catatan_verifikator||d.catatan_Verifikator||d.catatan_admin||'-'):'-'}</td><td>${history}</td><td>${aksi}</td></tr>`;
+  }).join('');
+  const tombolUpload=bolehUpload?`<div class="dok-upload-bar-v96 hidden" id="dokUploadBarV96"><span id="dokUploadInfoV96"></span><button onclick="uploadSemuaDokV96('${esc(k.id_kegiatan)}')" type="button">Upload Semua File</button></div>`:'';
+  const bulkBar=(verifier&&adaPending)?`<div class="bulk-verif-bar-v108"><label><input type="checkbox" class="dok-cek-v108" id="cekSemuaV108" onchange="document.querySelectorAll('.dok-cek-v108[data-idd]').forEach(c=>{c.checked=this.checked});updateBulkBarV108()"> Pilih semua</label><b id="bulkInfoV108">0 dipilih</b><button onclick="bulkVerifV108('VALID')" type="button">Valid-kan Terpilih</button><button class="btn-red" onclick="bulkVerifV108('PERBAIKAN')" type="button">Perbaikan Terpilih</button><span class="small">Dokumen yang tidak diceklis tetap bisa diverifikasi satu per satu.</span></div>`:'';
+  return `${tombolUpload}${bulkBar}<div class="table-wrap"><table class="dok-table-v96"><thead><tr>${verifier?'<th>Pilih</th>':''}<th>Jenis Dokumen</th><th>File</th><th>Status</th>${bolehUpload?'<th>Upload File</th>':''}<th>Catatan</th><th>Riwayat</th><th>Verifikasi</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+};
+function updateBulkBarV108(){
+  const n=document.querySelectorAll('.dok-cek-v108[data-idd]:checked').length;
+  const el=document.getElementById('bulkInfoV108'); if(el)el.textContent=n+' dipilih';
+}
+async function bulkVerifV108(status){
+  const ceks=[...document.querySelectorAll('.dok-cek-v108[data-idd]:checked')];
+  if(!ceks.length){alert('Ceklis dulu dokumen yang mau diverifikasi.');return;}
+  let catatan='';
+  if(status==='PERBAIKAN'){catatan=prompt('Alasan perbaikan untuk '+ceks.length+' dokumen terpilih (wajib):')||'';if(!catatan.trim()){alert('Alasan perbaikan wajib diisi.');return;}}
+  if(!confirm((status==='VALID'?'Valid-kan ':'Tandai PERBAIKAN ')+ceks.length+' dokumen terpilih?'))return;
+  showLoading('Verifikasi 1/'+ceks.length+'...');
+  let ok=0,gagal=[];
+  for(let i=0;i<ceks.length;i++){
+    const idd=ceks[i].dataset.idd, ctx=ceks[i].dataset.ctx;
+    document.getElementById('loadingText').innerText='Verifikasi '+(i+1)+'/'+ceks.length+'...';
+    try{
+      const r=ctx==='NON'
+        ?await apiPost({action:'verifyDokumenNonPengadaan',user:currentUser,id_dokumen_non:idd,status_verifikasi:status==='VALID'?'VALID DOKUMEN':'PERBAIKAN DOKUMEN',catatan_verifikator:catatan})
+        :await apiPost({action:'verifyDokumen',user:currentUser,id_dokumen:idd,status_verifikasi:status,catatan_admin:catatan});
+      if(r.success)ok++;else gagal.push(r.message||'gagal');
+    }catch(e){gagal.push(e.message);}
+  }
+  hideLoading();
+  alert(ok+' dokumen berhasil di'+(status==='VALID'?'validasi':'tandai perbaikan')+'.'+(gagal.length?'\nGagal:\n- '+gagal.join('\n- '):''));
+  await loadDashboard(false);renderAll();
+}
+
+/* ---------- (2) Upload perbaikan dirutekan ke action revisi ---------- */
+uploadSemuaDokV96=async function(idKegiatan){
+  const inputs=Array.from(document.querySelectorAll('.dok-file-v96')).filter(f=>f.files?.length);
+  if(!inputs.length){alert('Pilih file pada baris dokumen dulu.');return;}
+  showLoading('Upload 1/'+inputs.length+' dokumen...');
+  let ok=0,gagal=[];
+  for(let i=0;i<inputs.length;i++){
+    const inp=inputs[i],file=inp.files[0],jenis=inp.dataset.jenis,ctx=inp.dataset.ctx;
+    const isRevisi=inp.dataset.repair==='1'&&inp.dataset.idd;
+    document.getElementById('loadingText').innerText=(isRevisi?'Upload ulang ':'Upload ')+(i+1)+'/'+inputs.length+': '+jenis+'...';
+    try{
+      const base64=await fileToBase64(file);
+      let r;
+      if(isRevisi){
+        r=ctx==='NON'
+          ?await apiPost({action:'revisiDokumenNonPengadaan',user:currentUser,id_dokumen_non:inp.dataset.idd,file_name:file.name,mime_type:file.type,file_base64:base64})
+          :await apiPost({action:'revisiDokumen',user:currentUser,id_dokumen:inp.dataset.idd,file_name:file.name,mime_type:file.type,file_base64:base64});
+      }else{
+        r=await apiPost({action:ctx==='NON'?'uploadDokumenNonPengadaan':'uploadDokumen',user:currentUser,id_kegiatan:idKegiatan,jenis_dokumen:jenis,file_name:file.name,mime_type:file.type,file_base64:base64});
+      }
+      if(r.success)ok++;else gagal.push(jenis+': '+(r.message||'gagal'));
+    }catch(e){gagal.push(jenis+': '+e.message);}
+  }
+  hideLoading();
+  alert(ok+' dokumen berhasil diupload.'+(gagal.length?'\nGagal:\n- '+gagal.join('\n- '):''));
+  await loadDashboard(false);renderAll();
+};
+
+/* ---------- (4)(6)(7) Kartu Penyedia, Realisasi & HPS + template ---------- */
+function semuaDokTerunggahV108(k){
+  const state=tahapanStateFeV94(k);
+  const semua=[]; state.forEach(t=>t.dok.forEach(x=>semua.push(x)));
+  const kurang=semua.filter(x=>!x.uploaded).map(x=>x.jenis);
+  return {lengkap:kurang.length===0,kurang:kurang,total:semua.length};
+}
+renderDetailPengadaanLangsungV95=function(k){
+  const state=tahapanStateFeV94(k), final=String(k.status_pencairan||'').toUpperCase()==='SELESAI', approved=String(k.status_perencanaan||'').toUpperCase()==='DISETUJUI';
+  const info=kontrakInfoFeV94(k), pagu=toNumber(k.jumlah), tender=metodeKegiatanV94(k)==='TENDER MANUAL';
+  const proc=(dashboard?.prosesPengadaanV96||[]).find(x=>String(x.id_kegiatan)===String(k.id_kegiatan))||{};
+  const owner=isOwnerBidangV105(k), editable=(owner||isSuperAdminV65())&&!final;
+  const dok=semuaDokTerunggahV108(k);
+  const nilaiBisa=editable&&dok.lengkap;
+  let nextIdx=state.findIndex(t=>t.status!=='SELESAI');
+  const tahapHtml=approved?state.map((t,i)=>tahapDetailHtmlV94(k,t,i===nextIdx&&!final)).join(''):'<p class="empty">Perencanaan belum disetujui.</p>';
+  const nilaiHint=(!dok.lengkap&&editable)?`<div class="hint-lock-v108">Nilai Realisasi terkunci: upload dulu seluruh dokumen tahapan (${dok.total-dok.kurang.length}/${dok.total}). Belum diupload: ${dok.kurang.slice(0,4).map(esc).join(', ')}${dok.kurang.length>4?' dan '+(dok.kurang.length-4)+' lainnya':''}.</div>`:'';
+  const card=approved?`<section class="panel fade-up premium-panel"><div class="panel-head"><div><h3>Penyedia, Realisasi &amp; HPS</h3></div></div>${penyediaDatalistV94()}
+    <div class="form-grid"><div class="field"><label>Nama Penyedia Terpilih</label><input list="penyediaListV94" id="plPenyediaUtamaV96" value="${esc(info.penyedia)}" ${editable?'':'readonly'}></div>
+    <div class="field"><label>Nilai Realisasi / Kontrak (Rp)${nilaiBisa?'':' &#128274;'}</label><input inputmode="numeric" id="plNilaiRealisasiV96" data-max="${pagu}" oninput="onRupiahInputV96(this)" value="${info.nilai?Number(info.nilai).toLocaleString('id-ID'):''}" ${nilaiBisa?'':'readonly'} ${nilaiBisa?'':'title="Terbuka setelah semua dokumen tahapan diupload"'}></div></div>
+    ${nilaiHint}
+    <div class="hps-box-v105"><div class="panel-title-row"><div><h4>Rincian HPS</h4><p class="panel-sub">Pajak (%) memotong total: input 11 berarti total baris dikurangi 11%.</p></div>${editable?'<button class="btn-soft" type="button" onclick="addHpsRowV105()">+ Tambah Baris</button>':''}</div>
+    <div class="table-wrap"><table class="hps-table-v105"><thead><tr><th>Jenis Barang/Jasa</th><th>Satuan</th><th>Vol</th><th>Harga/Biaya</th><th>Pajak (%)</th><th>Total</th><th>Keterangan</th><th>Aksi</th></tr></thead><tbody id="hpsBodyV105">${hpsRowsHtmlV105(k,proc)}</tbody></table></div>
+    <div class="hps-grand-v105">TOTAL NILAI HPS (setelah dipotong pajak) <b id="hpsTotalV105">-</b></div></div>
+    ${editable?`<button onclick="simpanPenyediaNilaiPLV105('${esc(k.id_kegiatan)}')" type="button">Simpan Penyedia, Realisasi &amp; HPS</button>`:''}
+    <div class="tpl-bar-v96"><b>Data template dokumen</b>
+    <div class="template-meta-grid-v101">
+      <div class="field"><label>Nomor Dokumen</label><input id="tplNomorV101" value="${esc(proc.nomor_spk_kontrak||'')}"></div>
+      <div class="field"><label>Pejabat Penanda Tangan Komitmen</label><input id="tplPejabatV101"></div>
+      <div class="field"><label>Pelaksana Kegiatan Pengadaan</label><input id="tplPelaksanaV108"></div>
+      <div class="field"><label>Nama Penyedia</label><input id="tplPenyediaV101" value="${esc(info.penyedia)}"></div>
+      <div class="field span-2"><label>Lingkup &amp; Spesifikasi Pekerjaan (untuk SPK)</label><input id="tplLingkupV108" placeholder="Contoh: Menyediakan pengadaan ${esc(k.nama_kegiatan)} sesuai spesifikasi HPS"></div>
+    </div>
+    <div class="tpl-btns-v96">
+      <button class="btn-soft" onclick="downloadTemplateV105('${esc(k.id_kegiatan)}','SURVEY HARGA')">Survey Harga</button>
+      <button class="btn-soft" onclick="downloadTemplateV105('${esc(k.id_kegiatan)}','SPESIFIKASI DAN HPS')">Spesifikasi &amp; HPS</button>
+      <button class="btn-soft" onclick="downloadTemplateV105('${esc(k.id_kegiatan)}','${tender?'SURAT PERJANJIAN':'SPK'}')">${tender?'Surat Perjanjian':'SPK'}</button>
+      <button class="btn-soft" onclick="downloadTemplateV105('${esc(k.id_kegiatan)}','BA PEMERIKSAAN')">BA Pemeriksaan</button>
+      <button class="btn-soft" onclick="downloadTemplateV105('${esc(k.id_kegiatan)}','BA SERAH TERIMA PENYEDIA')">BAST Penyedia</button>
+      <button class="btn-soft" onclick="downloadTemplateV105('${esc(k.id_kegiatan)}','BA SERAH TERIMA KETUA UMUM')">BAST Ketua Umum</button>
+    </div><p class="small">Template terisi otomatis lengkap dengan blok tanda tangan (BAST Ketua Umum ditandatangani Dedy Sumarna selaku Ketua Umum KONI Kota Bogor). Download, tanda tangani, lalu upload pada baris dokumen terkait.</p></div>
+  </section>`:'';
+  document.getElementById('contentArea').innerHTML=`${backBarV95(k,(k.metode_pemilihan||'Pengadaan Langsung'))}${card}<section class="panel fade-up premium-panel pl-card-v94">${stepperHtmlV94(k,state)}${tahapHtml}</section>`;
+  setTimeout(hitungHpsV105,0);
+  const pj=document.getElementById('tplPejabatV101'); if(pj&&proc.catatan&&String(proc.catatan).startsWith('Pejabat penandatangan: ')) pj.value=String(proc.catatan).slice(23);
+};
+simpanPenyediaNilaiPLV105=async function(id){
+  const k=kegiatanById(id)||{};
+  const nama=document.getElementById('plPenyediaUtamaV96')?.value.trim()||'', nilai=valRupiahV96('plNilaiRealisasiV96'), rows=collectHpsV105(), hps=hitungHpsV105();
+  const dok=semuaDokTerunggahV108(k);
+  if(!nama){alert('Nama penyedia wajib diisi.');return;}
+  if(hps<=0){alert('Rincian HPS wajib diisi.');return;}
+  if(dok.lengkap&&nilai<=0){alert('Nilai realisasi/kontrak wajib diisi (semua dokumen sudah terupload).');return;}
+  showLoading('Menyimpan penyedia, realisasi, dan HPS...');
+  try{
+    const data={id_kegiatan:id,jalur_proses:metodeKegiatanV94(k)==='TENDER MANUAL'?'TENDER':'PENGADAAN LANGSUNG',nama_penyedia_snapshot:nama,nilai_hps:hps,spesifikasi_teknis:'[HPSJSON]'+JSON.stringify(rows)};
+    if(dok.lengkap&&nilai>0){data.nilai_kontrak=nilai;data.nilai_realisasi=nilai;}
+    const r=await apiPost({action:'saveProsesPengadaanV96',user:currentUser,data});
+    alert(r.message||(r.success?'Tersimpan':'Gagal'));
+    if(r.success){await loadDashboard(false);renderAll();}
+  }catch(e){alert('Gagal: '+e.message);}finally{hideLoading();}
+};
+downloadTemplateV105=async function(id,jenis){
+  const nomor=document.getElementById('tplNomorV101')?.value.trim()||'';
+  const pejabat=document.getElementById('tplPejabatV101')?.value.trim()||'';
+  const pelaksana=document.getElementById('tplPelaksanaV108')?.value.trim()||'';
+  const penyedia=document.getElementById('tplPenyediaV101')?.value.trim()||'';
+  const lingkup=document.getElementById('tplLingkupV108')?.value.trim()||'';
+  if(!nomor||!pejabat||!penyedia){alert('Isi Nomor Dokumen, Pejabat Penanda Tangan Komitmen, dan Nama Penyedia terlebih dahulu.');return;}
+  if(jenis==='SURVEY HARGA'&&!pelaksana){alert('Isi Pelaksana Kegiatan Pengadaan (penandatangan Survey Harga).');return;}
+  const hps=hitungHpsV105();
+  showLoading('Membuat template '+jenis+'...');
+  try{
+    const r=await apiPost({action:'generateProcurementTemplateV101',user:currentUser,data:{id_kegiatan:id,jenis_template:jenis,nomor_dokumen:nomor,pejabat_penandatangan:pejabat,pelaksana_pengadaan:pelaksana,nama_penyedia:penyedia,lingkup_pekerjaan:lingkup,nilai_hps:hps}});
+    alert(r.message||'');
+    if(r.success&&r.url_file)window.open(r.url_file,'_blank');
+  }catch(e){alert('Gagal: '+e.message);}finally{hideLoading();}
+};
+
+/* ---------- (1) Non Pengadaan: checklist jelas + nilai manual non-honor ---------- */
+const __renderDetailNonV108Base=renderDetailNonPengadaanV95;
+renderDetailNonPengadaanV95=function(k){
+  __renderDetailNonV108Base(k);
+  const docs=(dashboard?.dokumenNonPengadaan||[]).filter(d=>String(d.id_kegiatan)===String(k.id_kegiatan)&&d.url_file);
+  const isHonor=String(k.jenis_non_pengadaan||'Honorarium').toUpperCase().includes('HONOR');
+  const n=(typeof latestNonV79==='function')?latestNonV79(k.id_kegiatan):null;
+  const punya=j=>docs.some(d=>dokKeyV94(d.jenis_dokumen)===dokKeyV94(j));
+  // Checklist syarat menggantikan notice polos
+  const notice=document.querySelector('.notice-v103');
+  if(notice){
+    const items=[['Tanda Terima',punya('Tanda Terima')],['Bukti Potong Pajak',punya('Bukti Potong Pajak')]];
+    if(isHonor)items.unshift(['Dokumen Honor dibuat',!!n?.url_pdf]);
+    notice.innerHTML='Pencatatan realisasi terbuka setelah syarat berikut terpenuhi:<div class="cek-list-v108">'+items.map(x=>`<span class="${x[1]?'ok':'no'}">${x[1]?'&#10003;':'&#10007;'} ${esc(x[0])}</span>`).join('')+'</div>';
+  }
+  // Non-honor: nilai realisasi bisa diisi manual (netto tidak tersedia)
+  const nilaiEl=document.getElementById('npNilaiV96');
+  if(nilaiEl&&!isHonor){
+    nilaiEl.readOnly=false;
+    nilaiEl.dataset.max=String(toNumber(k.jumlah));
+    nilaiEl.setAttribute('oninput','onRupiahInputV96(this)');
+    nilaiEl.placeholder='Maks. '+rupiah(k.jumlah);
+  }
+};
