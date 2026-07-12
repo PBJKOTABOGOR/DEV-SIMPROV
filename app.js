@@ -8013,6 +8013,7 @@ async function generateHonorV112(){
     if(!volume||volume<=0){alert(`Volume penerima ke-${i+1} wajib diisi.`);return;}
     if(!plannedRate){alert('Nilai Honor belum tersedia dari Perencanaan.');return;}
     if(pajak<0||pajak>100){alert(`Tarif PPh 21 penerima ke-${i+1} harus 0–100%.`);return;}
+    const rowRate=plannedRate;
     totalVolume+=volume; totalBruto+=volume*rowRate;
     penerima.push({nama_penerima:nama,nik_npwp:nik,jabatan_peran:r.querySelector('.hperan')?.value||'',volume,satuan:k.satuan||'Orang/Kegiatan',tarif_honor:rowRate,kategori_pajak:kategori,jenis_pajak:'PPh 21',tarif_pajak:pajak,nilai_pajak:0});
   }
@@ -8149,7 +8150,7 @@ honorRowV112=function(k){
   </div>`;
 };
 
- 
+
 /* =========================================================
    SIMPROV v114 - Sinkron honor dan finalisasi Non Pengadaan
    ========================================================= */
