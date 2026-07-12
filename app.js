@@ -6575,6 +6575,7 @@ function renderDetailPengadaanLangsungV95(k){
       ${penyediaDatalistV94()}
       <div class="form-grid">
         <div class="field"><label>Nama Penyedia Terpilih</label><input list="penyediaListV94" id="plPenyediaUtamaV96" value="${esc(info.penyedia)}" ${bisaEdit ? '' : 'readonly'} placeholder="Ketik nama penyedia (otomatis masuk master)"></div>
+        <div class="field"><label>Nilai HPS (Rp)</label><input inputmode="numeric" id="plNilaiHpsV101" oninput="onRupiahInputV96(this)" value="${Number((dashboard?.prosesPengadaanV96||[]).find(x=>String(x.id_kegiatan)===String(k.id_kegiatan))?.nilai_hps||k.jumlah||0).toLocaleString('id-ID')}" ${bisaEdit ? '' : 'readonly'}></div>
         <div class="field"><label>Nilai Realisasi / Kontrak (Rp)</label><input inputmode="numeric" id="plNilaiRealisasiV96" data-max="${pagu}" oninput="onRupiahInputV96(this)" value="${info.nilai ? Number(info.nilai).toLocaleString('id-ID') : ''}" ${bisaEdit ? '' : 'readonly'} placeholder="Maks. ${rupiah(pagu)}"></div>
       </div>
       ${bisaEdit ? `<button onclick="simpanPenyediaNilaiPLV96('${esc(k.id_kegiatan)}')" type="button">Simpan Penyedia &amp; Nilai</button>` : ''}
@@ -6782,3 +6783,72 @@ savePerencanaan = async function(){
   try{ await __savePerencanaanV96Base(); }
   finally{ if(ketEl) ketEl.value = asli; sbPickIdxV96 = -1; const l = document.getElementById('sbTerpilihV96'); if(l) l.value = ''; }
 };
+
+/* =========================================================
+   SIMPROV v101 - Revisi Honor, Template SK, HPS, Non Pengadaan
+   ========================================================= */
+(function(){
+  const oldToggle = window.toggleKategoriV79;
+  window.toggleKategoriV79 = function(){
+    if(typeof oldToggle === 'function') oldToggle();
+    const non = document.getElementById('kategoriPerencanaanV79')?.value === 'NON PENGADAAN';
+    const jp = document.getElementById('jenisPengadaanV96');
+    if(jp){
+      if(non){
+        jp.innerHTML = '<option value="NON PENGADAAN">Non Pengadaan</option>';
+        jp.value = 'NON PENGADAAN';
+        jp.disabled = true;
+      }else{
+        jp.disabled = false;
+        if(![...jp.options].some(o=>o.value==='Barang')) jp.innerHTML='<option>Barang</option><option>Jasa Konstruksi</option><option>Jasa Konsultansi</option><option>Jasa Lainnya</option>';
+      }
+    }
+  };
+
+  const oldOpen = window.openHonorModalV79;
+  window.openHonorModalV79 = function(id){
+    const res = oldOpen(id);
+    setTimeout(()=>{
+      const modal=document.getElementById('honorModalV79');
+      if(!modal) return;
+      const note=modal.querySelector('.honor-tax-note-v87');
+      if(note) note.insertAdjacentHTML('beforeend','<br><b>Urutan pengesahan dokumen:</b> Pelaksana Kegiatan Pengadaan, Verifikator, dan Penerima Honor.');
+    },0);
+    return res;
+  };
+
+  const oldRenderPL = window.renderDetailPengadaanLangsungV95;
+  window.renderDetailPengadaanLangsungV95 = function(k){
+    oldRenderPL(k);
+    const bar=document.querySelector('.tpl-bar-v96');
+    if(!bar) return;
+    bar.innerHTML=`<b>Template dokumen sesuai Lampiran II SK. Isi data wajib sebelum membuat template:</b>
+      <div class="template-meta-grid-v101">
+        <div class="field"><label>Nomor Dokumen</label><input id="tplNomorV101" placeholder="Contoh: 027/SPK/PORPROV/VII/2026"></div>
+        <div class="field"><label>Pejabat yang Menandatangani</label><input id="tplPejabatV101" placeholder="Nama pejabat penandatangan"></div>
+        <div class="field"><label>Nama Penyedia</label><input id="tplPenyediaV101" value="${esc(document.getElementById('plPenyediaUtamaV96')?.value||'')}" placeholder="Nama penyedia"></div>
+      </div>
+      <div class="tpl-btns-v96">
+        <button class="btn-soft" onclick="downloadTemplateV101('${esc(k.id_kegiatan)}','SPESIFIKASI DAN HPS')" type="button">Spesifikasi &amp; HPS</button>
+        <button class="btn-soft" onclick="downloadTemplateV101('${esc(k.id_kegiatan)}','SPK')" type="button">SPK</button>
+        <button class="btn-soft" onclick="downloadTemplateV101('${esc(k.id_kegiatan)}','BA PEMERIKSAAN')" type="button">BA Pemeriksaan</button>
+        <button class="btn-soft" onclick="downloadTemplateV101('${esc(k.id_kegiatan)}','BA SERAH TERIMA PENYEDIA')" type="button">BAST Penyedia</button>
+        <button class="btn-soft" onclick="downloadTemplateV101('${esc(k.id_kegiatan)}','BA SERAH TERIMA KETUA UMUM')" type="button">BAST Ketua Umum</button>
+      </div>`;
+  };
+})();
+
+async function downloadTemplateV101(idKegiatan, jenis){
+  const nomor=document.getElementById('tplNomorV101')?.value.trim()||'';
+  const pejabat=document.getElementById('tplPejabatV101')?.value.trim()||'';
+  const penyedia=document.getElementById('tplPenyediaV101')?.value.trim()||'';
+  if(!nomor){ alert('Nomor dokumen wajib diisi.'); return; }
+  if(!pejabat){ alert('Nama pejabat yang menandatangani wajib diisi.'); return; }
+  if(!penyedia){ alert('Nama penyedia wajib diisi.'); return; }
+  showLoading('Membuat template dokumen sesuai SK...');
+  try{
+    const r=await apiPost({action:'generateProcurementTemplateV101',user:currentUser,data:{id_kegiatan:idKegiatan,jenis_template:jenis,nomor_dokumen:nomor,pejabat_penandatangan:pejabat,nama_penyedia:penyedia,nilai_hps:valRupiahV96('plNilaiHpsV101')}});
+    alert(r.message||'');
+    if(r.success&&r.url_file) window.open(r.url_file,'_blank');
+  }catch(e){alert('Gagal: '+e.message);}finally{hideLoading();}
+}
