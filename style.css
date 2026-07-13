@@ -2658,3 +2658,22 @@ body.modal-open-v122{overflow:hidden}
 .hps-modal-card-v122{position:relative!important;width:min(1240px,96vw)!important;max-height:92vh!important;overflow:auto!important;margin:0!important;box-shadow:0 28px 80px rgba(15,45,75,.28)!important}
 .hps-table-wrap-v122{max-height:45vh;overflow:auto}
 @media(max-width:720px){.hps-modal-backdrop-v122{padding:8px!important}.hps-modal-card-v122{width:98vw!important;max-height:96vh!important;padding:14px!important}}
+
+
+/* ===== SIMPROV v123 - warna status paket ===== */
+.paket-table-v95 tbody tr.paket-status-menunggu-v123{
+  background:linear-gradient(90deg,#eef7ff 0%,#f8fbff 100%);
+  box-shadow:inset 4px 0 0 #2493e6;
+}
+.paket-table-v95 tbody tr.paket-status-perbaikan-v123{
+  background:linear-gradient(90deg,#fff0f0 0%,#fffafa 100%);
+  box-shadow:inset 4px 0 0 #ef4444;
+}
+.paket-table-v95 tbody tr.paket-status-selesai-v123{
+  background:linear-gradient(90deg,#effcf3 0%,#fbfffc 100%);
+  box-shadow:inset 4px 0 0 #22c55e;
+}
+.paket-status-label-v123{display:inline-block;font-weight:700}
+.paket-status-menunggu-v123 .paket-status-label-v123{color:#126fbd;background:#dceeff;border:1px solid #b8dcfa;border-radius:999px;padding:4px 9px}
+.paket-status-perbaikan-v123 .paket-status-label-v123{color:#b42318;background:#fee4e2;border:1px solid #f8c7c3;border-radius:999px;padding:4px 9px}
+.paket-status-selesai-v123 .paket-status-label-v123{color:#17763b;background:#dcf7e5;border:1px solid #bcebc9;border-radius:999px;padding:4px 9px}
