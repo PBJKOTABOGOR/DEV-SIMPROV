@@ -2677,3 +2677,13 @@ body.modal-open-v122{overflow:hidden}
 .paket-status-menunggu-v123 .paket-status-label-v123{color:#126fbd;background:#dceeff;border:1px solid #b8dcfa;border-radius:999px;padding:4px 9px}
 .paket-status-perbaikan-v123 .paket-status-label-v123{color:#b42318;background:#fee4e2;border:1px solid #f8c7c3;border-radius:999px;padding:4px 9px}
 .paket-status-selesai-v123 .paket-status-label-v123{color:#17763b;background:#dcf7e5;border:1px solid #bcebc9;border-radius:999px;padding:4px 9px}
+
+/* SIMPROV v125 — popup Pengadaan Langsung */
+.pl-modal-backdrop-v125{z-index:12050!important;background:rgba(20,52,82,.36)!important;backdrop-filter:blur(7px)!important;overflow:auto!important;align-items:center!important}
+.pl-modal-card-v125{width:min(1280px,96vw)!important;max-height:92vh!important;overflow:auto!important;border-radius:22px!important}
+.pl-quick-panel-v125{padding-bottom:20px!important}
+.pl-summary-grid-v125{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:8px 0 16px}
+.pl-summary-grid-v125>div{border:1px solid #d7e7f4;background:#f8fbfe;border-radius:14px;padding:13px 15px;display:flex;flex-direction:column;gap:5px}
+.pl-summary-grid-v125 span{font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase}.pl-summary-grid-v125 b{color:var(--dark);font-size:16px}
+.pl-popup-actions-v125{display:flex;gap:10px;flex-wrap:wrap}.pl-template-buttons-v125{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px}.pl-template-buttons-v125 button{width:100%}
+@media(max-width:760px){.pl-summary-grid-v125{grid-template-columns:1fr}.pl-template-buttons-v125{grid-template-columns:1fr}.pl-modal-card-v125{width:98vw!important;max-height:96vh!important;padding:14px!important}}
