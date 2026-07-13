@@ -2732,3 +2732,39 @@ body.modal-open-v122{overflow:hidden}
   .summary-pl-v123{grid-template-columns:1fr}
   .actions-pl-v123>*{width:100%}
 }
+
+/* SIMPROV v126 */
+.planning-table-v126{min-width:1360px}
+.planning-table-v126 th.paket-col-v126,
+.planning-table-v126 td.paket-cell-v126{min-width:132px;text-align:center}
+.planning-table-v126 td:last-child{min-width:150px}
+.planning-table-v126 .btn-lihat-paket-v123{width:100%;white-space:nowrap}
+
+.modal-stage-v123{width:min(1460px,98vw)!important;max-height:94vh!important}
+.modal-stage-body-v123{padding:20px 24px 26px!important}
+.modal-stage-v123 .table-wrap{max-height:520px!important}
+.modal-stage-v123 .dok-table-v96{min-width:1120px}
+
+.hps-modal-wide-v126,
+.hps-modal-card-v122.hps-modal-wide-v126,
+#hpsOptionalModalV121 .modal-card{width:min(1500px,98vw)!important;max-width:none!important;max-height:94vh!important;overflow:auto!important}
+#hpsOptionalModalV121 .form-grid{grid-template-columns:repeat(3,minmax(230px,1fr))!important}
+#hpsOptionalModalV121 .hps-table-wrap-v126{overflow-x:visible!important;max-width:none!important}
+#hpsOptionalModalV121 .hps-table-v105{width:100%!important;min-width:0!important;table-layout:fixed}
+#hpsOptionalModalV121 .hps-table-v105 th:nth-child(1){width:18%}
+#hpsOptionalModalV121 .hps-table-v105 th:nth-child(2){width:24%}
+#hpsOptionalModalV121 .hps-table-v105 th:nth-child(3){width:10%}
+#hpsOptionalModalV121 .hps-table-v105 th:nth-child(4){width:11%}
+#hpsOptionalModalV121 .hps-table-v105 th:nth-child(5){width:14%}
+#hpsOptionalModalV121 .hps-table-v105 th:nth-child(6){width:13%}
+#hpsOptionalModalV121 .hps-table-v105 th:nth-child(7){width:10%}
+#hpsOptionalModalV121 .hps-table-v105 input{width:100%;min-width:0}
+#hpsOptionalModalV121 .hps-opt-jumlah{white-space:nowrap}
+
+@media(max-width:900px){
+  .modal-stage-v123{width:99vw!important}
+  #hpsOptionalModalV121 .modal-card{width:99vw!important}
+  #hpsOptionalModalV121 .form-grid{grid-template-columns:1fr!important}
+  #hpsOptionalModalV121 .hps-table-wrap-v126{overflow-x:auto!important}
+  #hpsOptionalModalV121 .hps-table-v105{min-width:1050px!important;table-layout:auto}
+}
