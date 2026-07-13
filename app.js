@@ -8522,11 +8522,11 @@ bukaHpsOptionalV121=function(id){
   modal.addEventListener('click',e=>{if(e.target===modal)closeHpsOptionalV122();});
   modal.innerHTML=`<div class="modal-card modal-wide-v121 hps-modal-card-v122" role="dialog" aria-modal="true">
     <div class="modal-head"><div><h3>Input Spesifikasi Teknis dan HPS</h3><p class="panel-sub">Template ini opsional. Dokumen tetap dapat diunggah manual.</p></div><button class="btn-soft" type="button" onclick="closeHpsOptionalV122()">Tutup</button></div>
-    <div class="form-grid"><div class="field"><label>Nomor Dokumen</label><input id="hpsOptNomorV121" placeholder="Nomor HPS"></div><div class="field"><label>Pejabat Penanda Tangan Komitmen</label><input id="hpsOptPejabatV121" value="${esc(bidang.pejabat_komitmen||'')}"></div><div class="field"><label>Nama Penyedia</label><input id="hpsOptPenyediaV121" value="${esc(proc.nama_penyedia_snapshot||'')}"></div></div>
+    <div class="form-grid"><div class="field"><label>Nomor Dokumen</label><input id="hpsOptNomorV121" placeholder="Nomor HPS"></div><div class="field"><label>Pejabat Penanda Tangan Komitmen</label><input id="hpsOptPejabatV121" value="${esc(bidang.pejabat_komitmen||'')}"></div><div class="field"><label>Nama Penyedia</label><input id="hpsOptPenyediaV121" value="${esc(proc.nama_penyedia_snapshot||'')}"></div><div class="field"><label>Alamat Penyedia</label><input id="hpsOptAlamatV124" placeholder="Alamat lengkap penyedia"></div><div class="field"><label>Nama Bank</label><input id="hpsOptBankV124" placeholder="Contoh: BCA"></div><div class="field"><label>Nomor Rekening</label><input id="hpsOptRekeningV124" placeholder="Nomor rekening penyedia"></div><div class="field"><label>Atas Nama Rekening</label><input id="hpsOptAtasNamaV124" placeholder="Nama pemilik rekening"></div></div>
     <div class="panel-title-row"><h4>Rincian HPS</h4><button class="btn-soft" type="button" onclick="addHpsOptionalRowV121()">+ Tambah Baris</button></div>
     <div class="table-wrap hps-table-wrap-v122"><table class="hps-table-v105"><thead><tr><th>Uraian</th><th>Spesifikasi Barang</th><th>Volume</th><th>Satuan</th><th>Harga Satuan</th><th>Jumlah</th><th>Aksi</th></tr></thead><tbody id="hpsOptBodyV121">${rows.map(hpsOptionalRowV121).join('')}</tbody></table></div>
     <div class="hps-grand-v105">TOTAL NILAI HPS <b id="hpsOptTotalV121">Rp 0</b></div>
-    <div class="action-group"><button class="btn-soft" type="button" onclick="simpanHpsOptionalV121('${esc(id)}',false)">Simpan Data HPS</button><button class="btn-green" type="button" onclick="bukaTemplateCetakHpsV122('${esc(id)}')">Buka Template Cetak</button></div>
+    <div class="action-group"><button class="btn-green" type="button" onclick="bukaTemplateCetakHpsV122('${esc(id)}')">Buka Template Cetak</button></div>
   </div>`;
   document.body.appendChild(modal);
   document.body.classList.add('modal-open-v122');
@@ -8538,8 +8538,8 @@ function buildHpsPrintHtmlV122(meta,rows,total){
   const tanggal=new Date().toLocaleDateString('id-ID',{day:'2-digit',month:'long',year:'numeric'});
   const body=rows.map((x,i)=>`<tr><td>${i+1}</td><td>${escapePrintV122(x.uraian)}</td><td>${escapePrintV122(x.spesifikasi)}</td><td>${escapePrintV122(x.vol)}</td><td>${escapePrintV122(x.satuan)}</td><td class="num">${rupiah(x.harga)}</td><td class="num">${rupiah(x.vol*x.harga)}</td></tr>`).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>Spesifikasi Teknis dan HPS</title><style>
-  @page{size:A4 landscape;margin:14mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;font-size:12px}.toolbar{position:sticky;top:0;background:#eef6fd;padding:10px;display:flex;gap:8px;justify-content:flex-end;border-bottom:1px solid #cbdceb}.toolbar button{border:0;border-radius:8px;padding:9px 14px;font-weight:700;cursor:pointer}.print{background:#0f6fb3;color:white}.close{background:#e8eef4}.sheet{padding:18px 4px}.header{text-align:center}.header h1{font-size:18px;margin:0 0 6px}.meta{display:grid;grid-template-columns:1fr 1fr;gap:4px 28px;margin:20px 0}.meta div{display:grid;grid-template-columns:150px 10px 1fr}.meta b{font-weight:700}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #111;padding:7px;vertical-align:top}th{text-align:center;background:#f2f5f8}.num{text-align:right;white-space:nowrap}.total td{font-weight:700}.sign{margin-top:34px;display:flex;justify-content:flex-end}.signbox{text-align:center;width:360px}.space{height:78px}.notes{margin-top:26px;line-height:1.5}@media print{.toolbar{display:none}.sheet{padding:0}}
-  </style></head><body><div class="toolbar"><button class="close" onclick="window.close()">Tutup</button><button class="print" onclick="window.print()">Cetak / Simpan PDF</button></div><div class="sheet"><div class="header"><h1>SPESIFIKASI TEKNIS DAN HARGA PERKIRAAN SENDIRI (HPS)</h1><b>${escapePrintV122(meta.namaKegiatan)}</b></div><div class="meta"><div><b>Nomor Dokumen</b><span>:</span><span>${escapePrintV122(meta.nomor||'-')}</span></div><div><b>Tanggal</b><span>:</span><span>${tanggal}</span></div><div><b>Bidang</b><span>:</span><span>${escapePrintV122(meta.bidang||'-')}</span></div><div><b>Nama Penyedia</b><span>:</span><span>${escapePrintV122(meta.penyedia||'-')}</span></div></div><table><thead><tr><th style="width:42px">No</th><th>Uraian</th><th>Spesifikasi Barang/Pekerjaan</th><th style="width:70px">Volume</th><th style="width:90px">Satuan</th><th style="width:120px">Harga Satuan</th><th style="width:125px">Jumlah</th></tr></thead><tbody>${body}<tr class="total"><td colspan="6" style="text-align:right">JUMLAH</td><td class="num">${rupiah(total)}</td></tr></tbody></table><div class="sign"><div class="signbox">Bogor, ${tanggal}<br>Pejabat Penanda Tangan Komitmen,<br>transaksi, kontrak/Surat Perintah Kerja<div class="space"></div><b>${escapePrintV122(meta.pejabat||'................................')}</b></div></div><div class="notes"><b>Catatan:</b><br>• Harga barang/jasa sudah termasuk pajak.<br>• Penyedia Barang/Jasa: ${escapePrintV122(meta.penyedia||'-')}</div></div></body></html>`;
+  @page{size:A4 landscape;margin:14mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;font-size:12px}.toolbar{position:sticky;top:0;background:#eef6fd;padding:10px;display:flex;gap:8px;justify-content:flex-end;border-bottom:1px solid #cbdceb}.toolbar button{border:0;border-radius:8px;padding:9px 14px;font-weight:700;cursor:pointer}.print{background:#0f6fb3;color:white}.close{background:#e8eef4}.sheet{padding:18px 4px}.header{text-align:center}.header h1{font-size:18px;margin:0 0 6px}.meta{display:grid;grid-template-columns:1fr 1fr;gap:4px 28px;margin:20px 0}.meta div{display:grid;grid-template-columns:150px 10px 1fr}.meta b{font-weight:700}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #111;padding:7px;vertical-align:top}th{text-align:center;background:#f2f5f8}.num{text-align:right;white-space:nowrap}.total td{font-weight:700}.sign{margin-top:34px;display:flex;justify-content:flex-end}.signbox{text-align:center;width:360px}.space{height:78px}.notes{margin-top:26px;line-height:1.5}.provider-note{display:grid;grid-template-columns:115px 10px 1fr;gap:2px 4px;margin-left:14px}@media print{.toolbar{display:none}.sheet{padding:0}}
+  </style></head><body><div class="toolbar"><button class="close" onclick="window.close()">Tutup</button><button class="print" onclick="window.print()">Cetak / Simpan PDF</button></div><div class="sheet"><div class="header"><h1>SPESIFIKASI TEKNIS DAN HARGA PERKIRAAN SENDIRI (HPS)</h1><b>${escapePrintV122(meta.namaKegiatan)}</b></div><div class="meta"><div><b>Nomor Dokumen</b><span>:</span><span>${escapePrintV122(meta.nomor||'-')}</span></div><div><b>Tanggal</b><span>:</span><span>${tanggal}</span></div><div><b>Bidang</b><span>:</span><span>${escapePrintV122(meta.bidang||'-')}</span></div><div><b>Nama Penyedia</b><span>:</span><span>${escapePrintV122(meta.penyedia||'-')}</span></div></div><table><thead><tr><th style="width:42px">No</th><th>Uraian</th><th>Spesifikasi Barang/Pekerjaan</th><th style="width:70px">Volume</th><th style="width:90px">Satuan</th><th style="width:120px">Harga Satuan</th><th style="width:125px">Jumlah</th></tr></thead><tbody>${body}<tr class="total"><td colspan="6" style="text-align:right">JUMLAH</td><td class="num">${rupiah(total)}</td></tr></tbody></table><div class="sign"><div class="signbox">Bogor, ${tanggal}<br>Pejabat Penanda Tangan Komitmen,<br>transaksi, kontrak/Surat Perintah Kerja<div class="space"></div><b>${escapePrintV122(meta.pejabat||'................................')}</b></div></div><div class="notes"><b>Catatan:</b><br>• Harga Barang sudah termasuk pajak<br>• Penyedia Barang dan Jasa:<br><div class="provider-note"><span>Nama</span><span>:</span><span>${escapePrintV122(meta.penyedia||'-')}</span><span>Alamat</span><span>:</span><span>${escapePrintV122(meta.alamat||'-')}</span><span>No Rekening</span><span>:</span><span>${escapePrintV122(meta.bank||'-')}/${escapePrintV122(meta.rekening||'-')}/${escapePrintV122(meta.atasNama||'-')}</span></div></div></div></body></html>`;
 }
 
 async function bukaTemplateCetakHpsV122(id){
@@ -8550,11 +8550,15 @@ async function bukaTemplateCetakHpsV122(id){
   const nomor=document.getElementById('hpsOptNomorV121')?.value.trim()||'';
   const pejabat=document.getElementById('hpsOptPejabatV121')?.value.trim()||'';
   const penyedia=document.getElementById('hpsOptPenyediaV121')?.value.trim()||'';
-  if(!nomor||!pejabat){alert('Nomor dokumen dan pejabat penandatangan wajib diisi.');return;}
+  const alamat=document.getElementById('hpsOptAlamatV124')?.value.trim()||'';
+  const bank=document.getElementById('hpsOptBankV124')?.value.trim()||'';
+  const rekening=document.getElementById('hpsOptRekeningV124')?.value.trim()||'';
+  const atasNama=document.getElementById('hpsOptAtasNamaV124')?.value.trim()||'';
+  if(!nomor||!pejabat||!penyedia||!alamat||!bank||!rekening||!atasNama){alert('Lengkapi Nomor Dokumen, Pejabat Penanda Tangan Komitmen, Nama Penyedia, Alamat, Nama Bank, Nomor Rekening, dan Atas Nama Rekening.');return;}
   const win=window.open('about:blank','_blank');
   if(!win){alert('Popup diblokir browser. Izinkan popup untuk membuka template cetak.');return;}
   const bidang=(dashboard?.bidang||dashboard?.bidangs||[]).find(b=>String(b.id_bidang)===String(k.id_bidang))||{};
-  win.document.open();win.document.write(buildHpsPrintHtmlV122({nomor,pejabat,penyedia,namaKegiatan:k.nama_kegiatan||'',bidang:bidang.nama_bidang||k.nama_bidang||''},rows,total));win.document.close();
+  win.document.open();win.document.write(buildHpsPrintHtmlV122({nomor,pejabat,penyedia,alamat,bank,rekening,atasNama,namaKegiatan:k.nama_kegiatan||'',bidang:bidang.nama_bidang||k.nama_bidang||''},rows,total));win.document.close();
   // Simpan data ke backend tanpa menahan pembukaan template.
   apiPost({action:'saveProsesPengadaanV96',user:currentUser,data:{id_kegiatan:id,jalur_proses:'PENCATATAN PENGADAAN',nama_penyedia_snapshot:penyedia,nilai_hps:total,spesifikasi_teknis:'[HPSJSON]'+JSON.stringify(rows)}}).then(r=>{if(r?.success){const p=(dashboard?.prosesPengadaanV96||[]).find(x=>String(x.id_kegiatan)===String(id));if(p)Object.assign(p,{nama_penyedia_snapshot:penyedia,nilai_hps:total,spesifikasi_teknis:'[HPSJSON]'+JSON.stringify(rows)});writeDashboardCache(dashboard);}}).catch(()=>{});
 }
@@ -8585,4 +8589,83 @@ uploadSemuaDokV96=async function(idKegiatan){
     });
     const kegiatan=kegiatanById(idKegiatan);if(kegiatan&&ok)kegiatan.status_pencairan='MENUNGGU VERIFIKASI DOKUMEN';writeDashboardCache(dashboard);renderAll();alert(ok+' dokumen berhasil diupload.'+(gagal.length?'\nGagal:\n- '+gagal.join('\n- '):''));syncDashboardSilentV111();
   }catch(e){alert('Gagal menyiapkan/upload dokumen: '+(e.message||e));}finally{hideLoading();}
+};
+
+
+/* =========================================================
+   SIMPROV v123 - Status warna paket + refresh pasca-action
+   ========================================================= */
+function paketRowClassV123(k){
+  const raw=String(paketStatusV95(k)||'').trim().toUpperCase();
+  if(raw.includes('SELESAI')) return 'paket-status-selesai-v123';
+  if(raw.includes('PERBAIKAN') || raw.includes('DITOLAK')) return 'paket-status-perbaikan-v123';
+  if(raw.includes('MENUNGGU') || raw.includes('DIAJUKAN') || raw.includes('BELUM ADA DOKUMEN')) return 'paket-status-menunggu-v123';
+  return '';
+}
+
+paketListHtmlV95=function(list,opts){
+  const q=paketSearchV95.toLowerCase();
+  const rows=list
+    .filter(k=>!q||String(k.nama_kegiatan||'').toLowerCase().includes(q)||String(k.id_kegiatan||'').toLowerCase().includes(q)||bidangName(k.id_bidang).toLowerCase().includes(q))
+    .map(k=>{const st=paketStatusV95(k);return `<tr class="paket-row-v95 ${paketRowClassV123(k)}">
+      <td><a href="javascript:void(0)" onclick="bukaPaketV95('${esc(k.id_kegiatan)}')" class="paket-link-v95">${esc(k.nama_kegiatan)}</a> ${metodeBadgeV95(k)}</td>
+      <td><span class="paket-status-label-v123">${esc(st)}</span></td>
+      <td>${esc(paketTanggalV95(k))}</td>
+      <td>${esc(bidangName(k.id_bidang))}</td>
+      <td><button class="btn-soft paket-buka-v95" onclick="bukaPaketV95('${esc(k.id_kegiatan)}')" type="button">${esc(opts.aksiLabel||'Buka Paket')}</button></td>
+    </tr>`;}).join('');
+  const buatBtn=(!canManage()&&!isReviewer())?`<button onclick="buatPaketV95()" type="button" class="paket-buat-v95">Buat Paket</button>`:'';
+  return `<section class="panel fade-up premium-panel">
+    <div class="panel-title-row"><div><h3>${esc(opts.judul)}</h3><p class="panel-sub">${opts.sub}</p></div>
+    <div class="action-group">${buatBtn}<button class="btn-refresh" onclick="refreshData()" type="button">Refresh Data</button></div></div>
+    ${opts.info||''}
+    <div class="paket-toolbar-v95"><span>Tampilan <b>${list.length}</b> paket</span>
+    <input type="text" placeholder="Cari nama paket / bidang / status..." value="${esc(paketSearchV95)}" oninput="paketSearchV95=this.value;renderContent()"></div>
+    <div class="table-wrap"><table class="paket-table-v95"><thead><tr><th>Nama Paket</th><th>Status</th><th>Tanggal Buat</th><th>Bidang / Satuan Kerja</th><th>Aksi</th></tr></thead>
+    <tbody>${rows||`<tr><td colspan="5" class="empty">Belum ada paket. Paket muncul otomatis dari Perencanaan yang sudah dibuat${opts.butuhSetuju?' dan DISETUJUI':''}. Klik "Buat Paket" untuk membuat perencanaan baru.</td></tr>`}</tbody></table></div>
+  </section>`;
+};
+
+/* Hindari cache lama tampil sesaat setelah action berhasil. */
+const __apiPostV123=apiPost;
+let __actionJustRanV123=false;
+apiPost=async function(payload){
+  const r=await __apiPostV123(payload);
+  const action=String(payload?.action||'');
+  if(action && !['getDashboard','login','getPublicDashboard'].includes(action) && r?.success){
+    __actionJustRanV123=true;
+  }
+  return r;
+};
+
+loadDashboard=async function(withLoader=true){
+  const skipCache=__actionJustRanV123;
+  __actionJustRanV123=false;
+  const cached=skipCache?null:readDashboardCache();
+  let renderedCache=false;
+  if(cached?.data){
+    try{
+      dashboard=normalizeDashboardData(cached.data);
+      const ui=document.getElementById('userInfo');if(ui)ui.innerText=`${currentUser.nama||'-'} - ${currentUser.nama_bidang||currentUser.id_bidang||'-'}`;
+      renderAll();renderedCache=true;
+    }catch(e){console.warn('CACHE_RENDER_FAILED',e);}
+  }
+  if(withLoader&&!renderedCache)showLoading(skipCache?'Memperbarui tampilan...':'Memuat data...');
+  try{
+    const r=await __apiPostV123({action:'getDashboard',user:currentUser});
+    if(!r.success){if(!renderedCache)alert(r.message||'Gagal memuat dashboard.');return;}
+    dashboard=normalizeDashboardData(r);writeDashboardCache(dashboard);
+    const ui=document.getElementById('userInfo');if(ui)ui.innerText=`${currentUser.nama||'-'} - ${currentUser.nama_bidang||currentUser.id_bidang||'-'}`;
+    renderAll();
+  }catch(err){
+    console.error('LOAD_DASHBOARD_ERROR:',err);
+    if(!renderedCache)alert('Gagal memuat dashboard. Detail: '+String(err.message||err).slice(0,240));
+  }finally{if(withLoader)hideLoading();}
+};
+
+/* Toast lebih singkat agar tidak terasa lambat/menutupi aksi berikutnya. */
+showFastCacheNotice=function(text){
+  document.getElementById('cacheNotice')?.remove();
+  const div=document.createElement('div');div.id='cacheNotice';div.className='cache-notice';div.innerText=text;document.body.appendChild(div);
+  setTimeout(()=>div.remove(),1400);
 };
