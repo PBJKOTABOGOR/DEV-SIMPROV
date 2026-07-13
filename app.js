@@ -5612,7 +5612,7 @@ function tahapanDefFeV95(metode){
 
 dokumenKetentuanByMetode = function(metode){
   const m = String(metode || "").toUpperCase();
-  if(m === "BELANJA LANGSUNG") return ["Hasil Survey Harga","Spesifikasi Teknis dan HPS","Kuitansi / Nota / Invoice","Bukti Pembelian / Kwitansi","Berita Acara Pemeriksaan Barang/Pekerjaan","Berita Acara Serah Terima","Faktur Pembelian","SPTJM","Surat Permohonan Pembayaran","Nota Dinas Pencairan","Surat Perintah Pembayaran"];
+  if(m === "BELANJA LANGSUNG") return ["Hasil Survey Harga","Spesifikasi Teknis dan HPS","Kuitansi / Nota / Invoice","Berita Acara Pemeriksaan Barang/Pekerjaan","Berita Acara Serah Terima","Faktur Pembelian","SPTJM","Surat Permohonan Pembayaran","Nota Dinas Pencairan","Surat Perintah Pembayaran"];
   if(m === "PENGADAAN LANGSUNG" || m === "TENDER MANUAL"){
     const out = [];
     tahapanDefFeV95(m).forEach(t => t.dok.forEach(j => { if(!out.includes(j)) out.push(j); }));
@@ -8730,8 +8730,7 @@ function openGenericTemplateV123(id,jenis){
 function templateButtonsStageV123(k,stage){
   return `<div class="template-stage-grid-v123">${stage.dok.map(j=>{
     const source=TEMPLATE_ACUAN_PL_V123[j];
-    const hps=dokKeyV94(j)===dokKeyV94('Spesifikasi Teknis dan HPS');
-    return `<article class="template-item-v123"><div><b>${esc(j)}</b><small>Opsional — cetak/simpan sendiri, lalu unggah dokumen final.</small></div><div class="action-group">${hps?`<button class="btn-green" type="button" onclick="closeModalPLV123();bukaHpsPengadaanLangsungV123('${esc(k.id_kegiatan)}')">Isi &amp; Cetak HPS</button>`:`<button class="btn-soft" type="button" onclick="openGenericTemplateV123('${esc(k.id_kegiatan)}','${esc(j)}')">Template Cetak</button>`}${source?`<button class="btn-soft" type="button" onclick="openTemplateSourceV123('${esc(source)}')">Buka Format Acuan</button>`:''}</div></article>`;
+    return `<article class="template-item-v123"><div><b>${esc(j)}</b><small>${source?'Template acuan tersedia.':'Belum tersedia template acuan.'}</small></div><div class="action-group">${source?`<button class="btn-soft" type="button" onclick="openTemplateSourceV123('${esc(source)}')">Buka Template</button>`:''}</div></article>`;
   }).join('')}</div>`;
 }
 function openAllTemplatesPLV123(id){
@@ -8911,3 +8910,38 @@ bukaTemplateCetakHpsV122=async function(id){
     writeDashboardCache(dashboard);
   }).catch(()=>{});
 };
+
+
+/* =========================================================
+   SIMPROV v125 - Template acuan Pengadaan Langsung saja
+   - "Bukti Pembelian / Kwitansi" disatukan ke "Kuitansi / Nota / Invoice".
+   - Dokumen wajib Belanja Langsung menjadi 10 jenis.
+   - Data dokumen lama tetap tersimpan, tetapi tidak lagi dihitung sebagai syarat terpisah.
+   ========================================================= */
+(function fixDokumenWajibPencatatanV124(){
+  const unified='Kuitansi / Nota / Invoice';
+  const duplicate='Bukti Pembelian / Kwitansi';
+
+  dokumenKetentuanByMetode = function(metode){
+    const m=String(metode||'').toUpperCase();
+    if(m==='BELANJA LANGSUNG') return [
+      'Hasil Survey Harga',
+      'Spesifikasi Teknis dan HPS',
+      unified,
+      'Berita Acara Pemeriksaan Barang/Pekerjaan',
+      'Berita Acara Serah Terima',
+      'Faktur Pembelian',
+      'SPTJM',
+      'Surat Permohonan Pembayaran',
+      'Nota Dinas Pencairan',
+      'Surat Perintah Pembayaran'
+    ];
+    if(m==='PENGADAAN LANGSUNG'||m==='TENDER MANUAL'){
+      const out=[];
+      tahapanDefFeV95(m).forEach(t=>t.dok.forEach(j=>{if(dokKeyV94(j)!==dokKeyV94(duplicate)&&!out.some(x=>dokKeyV94(x)===dokKeyV94(j)))out.push(j);}));
+      return out;
+    }
+    return JENIS_DOKUMEN_SOP.filter(j=>dokKeyV94(j)!==dokKeyV94(duplicate));
+  };
+  dokumenKetentuanByNilai = function(jumlah){return dokumenKetentuanByMetode(metodePemilihanByNilai(jumlah));};
+})();
