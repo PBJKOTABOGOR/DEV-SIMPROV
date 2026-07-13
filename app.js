@@ -8669,3 +8669,200 @@ showFastCacheNotice=function(text){
   const div=document.createElement('div');div.id='cacheNotice';div.className='cache-notice';div.innerText=text;document.body.appendChild(div);
   setTimeout(()=>div.remove(),1400);
 };
+
+/* =========================================================
+   SIMPROV v125 — Pengadaan Langsung: seluruh input dalam popup
+   ========================================================= */
+function closePLModalV125(){
+  document.getElementById('plModalV125')?.remove();
+}
+function ensurePLModalRootV125(){
+  closePLModalV125();
+  const root=document.createElement('div');
+  root.id='plModalV125';
+  root.className='modal-backdrop pl-modal-backdrop-v125';
+  root.addEventListener('click',e=>{if(e.target===root)closePLModalV125();});
+  document.body.appendChild(root);
+  return root;
+}
+function openPLPenyediaHpsV125(id){
+  const k=kegiatanById(id)||{};
+  const info=kontrakInfoFeV94(k), pagu=toNumber(k.jumlah);
+  const proc=(dashboard?.prosesPengadaanV96||[]).find(x=>String(x.id_kegiatan)===String(id))||{};
+  const final=String(k.status_pencairan||'').toUpperCase()==='SELESAI';
+  const owner=isOwnerBidangV105(k), editable=(owner||isSuperAdminV65())&&!final;
+  const dok=semuaDokTerunggahV108(k);
+  const nilaiBisa=editable&&dok.lengkap;
+  const root=ensurePLModalRootV125();
+  const nilaiHint=(!dok.lengkap&&editable)?`<div class="hint-lock-v108">Nilai Realisasi terkunci: upload dulu seluruh dokumen tahapan (${dok.total-dok.kurang.length}/${dok.total}). Belum diupload: ${dok.kurang.slice(0,4).map(esc).join(', ')}${dok.kurang.length>4?' dan '+(dok.kurang.length-4)+' lainnya':''}.</div>`:'';
+  root.innerHTML=`<div class="modal-card modal-wide pl-modal-card-v125 fade-up">
+    <div class="modal-head"><div><h3>Penyedia, Realisasi &amp; HPS</h3><p>${esc(k.nama_kegiatan||'')}</p></div><button class="btn-soft" type="button" onclick="closePLModalV125()">Tutup</button></div>
+    ${penyediaDatalistV94()}
+    <div class="form-grid"><div class="field"><label>Nama Penyedia Terpilih</label><input list="penyediaListV94" id="plPenyediaUtamaV96" value="${esc(info.penyedia)}" ${editable?'':'readonly'}></div>
+    <div class="field"><label>Nilai Realisasi / Kontrak (Rp)${nilaiBisa?'':' &#128274;'}</label><input inputmode="numeric" id="plNilaiRealisasiV96" data-max="${pagu}" oninput="onRupiahInputV96(this)" value="${info.nilai?Number(info.nilai).toLocaleString('id-ID'):''}" ${nilaiBisa?'':'readonly'}></div></div>
+    ${nilaiHint}
+    <div class="hps-box-v105"><div class="panel-title-row"><div><h4>Rincian HPS</h4><p class="panel-sub">Pajak (%) memotong total nilai baris.</p></div>${editable?'<button class="btn-soft" type="button" onclick="addHpsRowV105()">+ Tambah Baris</button>':''}</div>
+    <div class="table-wrap"><table class="hps-table-v105"><thead><tr><th>Jenis Barang/Jasa</th><th>Satuan</th><th>Vol</th><th>Harga/Biaya</th><th>Pajak (%)</th><th>Total</th><th>Keterangan</th><th>Aksi</th></tr></thead><tbody id="hpsBodyV105">${hpsRowsHtmlV105(k,proc)}</tbody></table></div>
+    <div class="hps-grand-v105">TOTAL NILAI HPS (setelah dipotong pajak) <b id="hpsTotalV105">-</b></div></div>
+    <div class="modal-actions">${editable?`<button type="button" onclick="simpanPenyediaNilaiPLV125('${esc(id)}')">Simpan Penyedia, Realisasi &amp; HPS</button>`:''}<button class="btn-soft" type="button" onclick="closePLModalV125()">Tutup</button></div>
+  </div>`;
+  setTimeout(hitungHpsV105,0);
+}
+function openPLTemplateV125(id){
+  const k=kegiatanById(id)||{};
+  const info=kontrakInfoFeV94(k);
+  const proc=(dashboard?.prosesPengadaanV96||[]).find(x=>String(x.id_kegiatan)===String(id))||{};
+  const tender=metodeKegiatanV94(k)==='TENDER MANUAL';
+  const root=ensurePLModalRootV125();
+  root.innerHTML=`<div class="modal-card modal-wide pl-modal-card-v125 fade-up">
+    <div class="modal-head"><div><h3>Template Dokumen Pengadaan</h3><p>${esc(k.nama_kegiatan||'')}</p></div><button class="btn-soft" type="button" onclick="closePLModalV125()">Tutup</button></div>
+    <div class="template-meta-grid-v101">
+      <div class="field"><label>Nomor Dokumen</label><input id="tplNomorV101" value="${esc(proc.nomor_spk_kontrak||'')}"></div>
+      <div class="field"><label>Pejabat Penanda Tangan Komitmen</label><input id="tplPejabatV101"></div>
+      <div class="field"><label>Pelaksana Kegiatan Pengadaan</label><input id="tplPelaksanaV108"></div>
+      <div class="field"><label>Nama Penyedia</label><input id="tplPenyediaV101" value="${esc(info.penyedia)}"></div>
+      <div class="field span-2"><label>Lingkup &amp; Spesifikasi Pekerjaan (untuk SPK)</label><input id="tplLingkupV108" placeholder="Contoh: Menyediakan ${esc(k.nama_kegiatan||'')} sesuai spesifikasi HPS"></div>
+    </div>
+    <div class="tpl-btns-v96 pl-template-buttons-v125">
+      <button class="btn-soft" onclick="downloadTemplateV105('${esc(id)}','SURVEY HARGA')">Survey Harga</button>
+      <button class="btn-soft" onclick="downloadTemplateV105('${esc(id)}','SPESIFIKASI DAN HPS')">Spesifikasi &amp; HPS</button>
+      <button class="btn-soft" onclick="downloadTemplateV105('${esc(id)}','${tender?'SURAT PERJANJIAN':'SPK'}')">${tender?'Surat Perjanjian':'SPK'}</button>
+      <button class="btn-soft" onclick="downloadTemplateV105('${esc(id)}','BA PEMERIKSAAN')">BA Pemeriksaan</button>
+      <button class="btn-soft" onclick="downloadTemplateV105('${esc(id)}','BA SERAH TERIMA PENYEDIA')">BAST Penyedia</button>
+      <button class="btn-soft" onclick="downloadTemplateV105('${esc(id)}','BA SERAH TERIMA KETUA UMUM')">BAST Ketua Umum</button>
+    </div>
+    <div class="modal-actions"><button class="btn-soft" type="button" onclick="closePLModalV125()">Tutup</button></div>
+  </div>`;
+  const pj=document.getElementById('tplPejabatV101');
+  if(pj&&proc.catatan&&String(proc.catatan).startsWith('Pejabat penandatangan: ')) pj.value=String(proc.catatan).slice(23);
+}
+async function simpanPenyediaNilaiPLV125(id){
+  const k=kegiatanById(id)||{};
+  const nama=document.getElementById('plPenyediaUtamaV96')?.value.trim()||'';
+  const nilai=valRupiahV96('plNilaiRealisasiV96'), rows=collectHpsV105(), hps=hitungHpsV105();
+  const dok=semuaDokTerunggahV108(k);
+  if(!nama){alert('Nama penyedia wajib diisi.');return;}
+  if(hps<=0){alert('Rincian HPS wajib diisi.');return;}
+  if(dok.lengkap&&nilai<=0){alert('Nilai realisasi/kontrak wajib diisi.');return;}
+  showLoading('Menyimpan penyedia, realisasi, dan HPS...');
+  try{
+    const data={id_kegiatan:id,jalur_proses:metodeKegiatanV94(k)==='TENDER MANUAL'?'TENDER':'PENGADAAN LANGSUNG',nama_penyedia_snapshot:nama,nilai_hps:hps,spesifikasi_teknis:'[HPSJSON]'+JSON.stringify(rows)};
+    if(dok.lengkap&&nilai>0){data.nilai_kontrak=nilai;data.nilai_realisasi=nilai;}
+    const r=await apiPost({action:'saveProsesPengadaanV96',user:currentUser,data});
+    alert(r.message||(r.success?'Tersimpan':'Gagal'));
+    if(r.success){closePLModalV125();await loadDashboard(false);renderAll();}
+  }catch(e){alert('Gagal: '+e.message);}finally{hideLoading();}
+}
+renderDetailPengadaanLangsungV95=function(k){
+  const state=tahapanStateFeV94(k), final=String(k.status_pencairan||'').toUpperCase()==='SELESAI', approved=String(k.status_perencanaan||'').toUpperCase()==='DISETUJUI';
+  const info=kontrakInfoFeV94(k), proc=(dashboard?.prosesPengadaanV96||[]).find(x=>String(x.id_kegiatan)===String(k.id_kegiatan))||{};
+  let nextIdx=state.findIndex(t=>t.status!=='SELESAI');
+  const tahapHtml=approved?state.map((t,i)=>tahapDetailHtmlV94(k,t,i===nextIdx&&!final)).join(''):'<p class="empty">Perencanaan belum disetujui.</p>';
+  const ringkas=approved?`<section class="panel fade-up premium-panel pl-quick-panel-v125">
+    <div class="panel-head"><div><h3>Data Paket Pengadaan</h3><p class="panel-sub">Isi data melalui popup agar halaman tahapan tetap ringkas.</p></div></div>
+    <div class="pl-summary-grid-v125">
+      <div><span>Penyedia</span><b>${esc(info.penyedia||'Belum diisi')}</b></div>
+      <div><span>Nilai HPS</span><b>${rupiah(toNumber(proc.nilai_hps)||0)}</b></div>
+      <div><span>Nilai Realisasi/Kontrak</span><b>${rupiah(toNumber(info.nilai)||0)}</b></div>
+    </div>
+    <div class="action-group pl-popup-actions-v125">
+      <button type="button" onclick="openPLPenyediaHpsV125('${esc(k.id_kegiatan)}')">Isi Penyedia, Realisasi &amp; HPS</button>
+      <button class="btn-soft" type="button" onclick="openPLTemplateV125('${esc(k.id_kegiatan)}')">Buat Template Dokumen</button>
+    </div>
+  </section>`:'';
+  document.getElementById('contentArea').innerHTML=`${backBarV95(k,(k.metode_pemilihan||'Pengadaan Langsung'))}${ringkas}<section class="panel fade-up premium-panel pl-card-v94">${stepperHtmlV94(k,state)}${tahapHtml}</section>`;
+};
+
+/* =========================================================
+   SIMPROV v126 - Batas HPS mengikuti pagu perencanaan
+   ========================================================= */
+window.__hpsPaguLimitV126 = 0;
+window.__hpsLimitContextV126 = '';
+
+function setHpsPaguLimitV126(id, context){
+  const k = kegiatanById(id) || {};
+  window.__hpsPaguLimitV126 = Math.max(0, toNumber(k.jumlah));
+  window.__hpsLimitContextV126 = context || '';
+}
+
+function showHpsLimitInfoV126(total){
+  const limit = Number(window.__hpsPaguLimitV126 || 0);
+  let info = document.getElementById('hpsLimitInfoV126');
+  const totalEl = document.getElementById('hpsOptTotalV121') || document.getElementById('hpsTotalV105');
+  const box = totalEl?.closest('.hps-grand-v105');
+  if(!box) return;
+  if(!info){
+    info = document.createElement('div');
+    info.id = 'hpsLimitInfoV126';
+    info.style.cssText = 'margin-top:6px;font-size:12px;font-weight:700;color:#64748b;text-align:right';
+    box.appendChild(info);
+  }
+  info.textContent = limit > 0 ? `Maksimal sesuai pagu perencanaan: ${rupiah(limit)}` : '';
+  info.style.color = total >= limit && limit > 0 ? '#b45309' : '#64748b';
+}
+
+function capHpsOptionalV126(){
+  const limit = Number(window.__hpsPaguLimitV126 || 0);
+  let running = 0;
+  document.querySelectorAll('.hps-opt-row-v121').forEach(tr=>{
+    const volEl = tr.querySelector('.hps-opt-vol');
+    const hargaEl = tr.querySelector('.hps-opt-harga');
+    const vol = Math.max(0, parseFloat((volEl?.value||'0').replace(',','.')) || 0);
+    let harga = Math.max(0, toNumber(hargaEl?.value||0));
+    if(limit > 0 && vol > 0 && running + (vol * harga) > limit){
+      harga = Math.max(0, Math.floor((limit - running) / vol));
+      if(hargaEl) hargaEl.value = harga.toLocaleString('id-ID');
+    }
+    const total = vol * harga;
+    running += total;
+    const c = tr.querySelector('.hps-opt-jumlah');
+    if(c) c.textContent = rupiah(total);
+  });
+  const result = Math.round(running);
+  const el = document.getElementById('hpsOptTotalV121');
+  if(el) el.textContent = rupiah(result);
+  showHpsLimitInfoV126(result);
+  return result;
+}
+
+function capHpsUtamaV126(){
+  const limit = Number(window.__hpsPaguLimitV126 || 0);
+  let running = 0;
+  document.querySelectorAll('.hps-row-v105').forEach(tr=>{
+    const volEl = tr.querySelector('.hps-vol-v105');
+    const hargaEl = tr.querySelector('.hps-harga-v105');
+    const pajakEl = tr.querySelector('.hps-pajak-v105');
+    const vol = Math.max(0, parseFloat((volEl?.value||'0').replace(',','.')) || 0);
+    const pajak = Math.min(100, Math.max(0, parseFloat((pajakEl?.value||'0').replace(',','.')) || 0));
+    const faktor = vol * (1 - pajak / 100);
+    let harga = Math.max(0, toNumber(hargaEl?.value||0));
+    if(limit > 0 && faktor > 0 && running + (faktor * harga) > limit){
+      harga = Math.max(0, Math.floor((limit - running) / faktor));
+      if(hargaEl) hargaEl.value = harga.toLocaleString('id-ID');
+    }
+    const total = Math.max(0, faktor * harga);
+    running += total;
+    const c = tr.querySelector('.hps-total-v105');
+    if(c) c.textContent = rupiah(total);
+  });
+  const result = Math.round(running);
+  const el = document.getElementById('hpsTotalV105');
+  if(el) el.textContent = rupiah(result);
+  showHpsLimitInfoV126(result);
+  return result;
+}
+
+const __bukaHpsOptionalV126Base = bukaHpsOptionalV121;
+bukaHpsOptionalV121 = function(id){
+  setHpsPaguLimitV126(id, 'OPTIONAL');
+  return __bukaHpsOptionalV126Base(id);
+};
+
+const __openPLPenyediaHpsV126Base = openPLPenyediaHpsV125;
+openPLPenyediaHpsV125 = function(id){
+  setHpsPaguLimitV126(id, 'PL');
+  return __openPLPenyediaHpsV126Base(id);
+};
+
+hitungHpsOptionalV121 = capHpsOptionalV126;
+hitungHpsV105 = capHpsUtamaV126;
