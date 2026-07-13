@@ -8945,3 +8945,93 @@ bukaTemplateCetakHpsV122=async function(id){
   };
   dokumenKetentuanByNilai = function(jumlah){return dokumenKetentuanByMetode(metodePemilihanByNilai(jumlah));};
 })();
+
+/* =========================================================
+   SIMPROV v126 - Revisi tampilan Perencanaan & modal Pengadaan Langsung
+   - Non Pengadaan selalu menampilkan metode NON PENGADAAN.
+   - Lihat Paket dipisah ke kolom tersendiri.
+   - Modal Kelola Tahap dan Input HPS diperlebar.
+   - Input HPS di dalam sistem dikembalikan khusus Spesifikasi Teknis dan HPS.
+   Catatan: alur Pencatatan Non Pengadaan tidak diubah.
+   ========================================================= */
+function enhancePlanningTableV126(){
+  const panels=[...document.querySelectorAll('#contentArea .panel, #contentArea section')];
+  const panel=panels.find(p=>p.querySelector('table')&&/Data Perencanaan|Persetujuan Perencanaan|Pemeriksaan Data Perencanaan/i.test(p.textContent||''));
+  if(!panel)return;
+  const table=panel.querySelector('table');
+  if(!table)return;
+  const headRow=table.querySelector('thead tr');
+  if(!headRow)return;
+  const headers=[...headRow.children];
+  let packageIndex=headers.findIndex(th=>String(th.textContent||'').trim().toUpperCase()==='PAKET');
+  let actionIndex=headers.findIndex(th=>String(th.textContent||'').trim().toUpperCase()==='AKSI');
+  if(actionIndex<0)actionIndex=headers.length-1;
+  if(packageIndex<0){
+    const th=document.createElement('th');
+    th.textContent='Paket';
+    th.className='paket-col-v126';
+    headRow.insertBefore(th,headRow.children[actionIndex]);
+    packageIndex=actionIndex;
+  }
+  table.querySelectorAll('tbody tr').forEach(tr=>{
+    const cells=[...tr.children];
+    if(!cells.length||tr.querySelector('td.empty'))return;
+    const rowText=tr.textContent||'';
+    const k=(dashboard?.perencanaan||[]).find(x=>rowText.includes(String(x.id_kegiatan||'')));
+    if(!k)return;
+    const isNon=isNonKategoriV81(k)||String(k.kategori||'').toUpperCase()==='NON PENGADAAN';
+    const currentCells=[...tr.children];
+    if(isNon&&currentCells[7])currentCells[7].innerHTML='<b>NON PENGADAAN</b>';
+    let paketCell=tr.querySelector('td.paket-cell-v126');
+    if(!paketCell){
+      paketCell=document.createElement('td');
+      paketCell.className='paket-cell-v126 nowrap';
+      const last=tr.lastElementChild;
+      tr.insertBefore(paketCell,last);
+    }
+    const oldButton=tr.lastElementChild?.querySelector('.btn-lihat-paket-v123');
+    if(oldButton)paketCell.appendChild(oldButton);
+    if(!paketCell.querySelector('.btn-lihat-paket-v123')&&String(k.status_perencanaan||'').toUpperCase()==='DISETUJUI'){
+      const b=document.createElement('button');
+      b.type='button';
+      b.className='btn-mini btn-detail btn-lihat-paket-v123';
+      b.textContent='Lihat Paket';
+      b.onclick=()=>lihatPaketDariPerencanaanV123(k.id_kegiatan);
+      paketCell.appendChild(b);
+    }
+  });
+  table.classList.add('planning-table-v126');
+}
+
+const __renderPerencanaanV126Base=renderPerencanaan;
+renderPerencanaan=function(){
+  const r=__renderPerencanaanV126Base.apply(this,arguments);
+  setTimeout(enhancePlanningTableV126,25);
+  return r;
+};
+
+/* HPS dapat diisi langsung di sistem sekaligus tetap menyediakan format acuan. */
+templateButtonsStageV123=function(k,stage){
+  return `<div class="template-stage-grid-v123">${stage.dok.map(j=>{
+    const source=TEMPLATE_ACUAN_PL_V123[j];
+    const isHps=dokKeyV94(j)===dokKeyV94('Spesifikasi Teknis dan HPS');
+    const actions=[];
+    if(isHps)actions.push(`<button class="btn-green" type="button" onclick="bukaHpsPengadaanLangsungV123('${esc(k.id_kegiatan)}')">Isi HPS di Sistem</button>`);
+    if(source)actions.push(`<button class="btn-soft" type="button" onclick="openTemplateSourceV123('${esc(source)}')">Buka Template</button>`);
+    return `<article class="template-item-v123"><div><b>${esc(j)}</b><small>${isHps?'Dapat diisi langsung di sistem atau menggunakan format acuan.':(source?'Template acuan tersedia.':'Belum tersedia template acuan.')}</small></div><div class="action-group">${actions.join('')}</div></article>`;
+  }).join('')}</div>`;
+};
+
+/* Pastikan modal HPS selalu memakai kelas lebar dan tidak membutuhkan geser horizontal. */
+const __bukaHpsOptionalV126Base=bukaHpsOptionalV121;
+bukaHpsOptionalV121=function(id){
+  const r=__bukaHpsOptionalV126Base.apply(this,arguments);
+  setTimeout(()=>{
+    const modal=document.getElementById('hpsOptionalModalV121');
+    const card=modal?.querySelector('.modal-card');
+    if(card)card.classList.add('hps-modal-wide-v126');
+    const tableWrap=modal?.querySelector('.table-wrap');
+    if(tableWrap)tableWrap.classList.add('hps-table-wrap-v126');
+  },0);
+  return r;
+};
