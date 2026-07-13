@@ -2649,3 +2649,5 @@ tr:has(.per-file-revision) td{
 .paket-status-selesai-v117{display:inline-flex;padding:5px 10px;border-radius:999px;background:#dcf8e5;color:#167239;font-weight:800;font-size:12px;border:1px solid #bdecca}
 .pipeline-pgd-v117{grid-template-columns:repeat(5,minmax(165px,1fr))}
 @media(max-width:800px){.pipeline-pgd-v117{grid-template-columns:repeat(5,minmax(150px,1fr));overflow-x:auto}}
+
+.modal-wide-v121{width:min(1180px,96vw);max-height:92vh;overflow:auto}.btn-hps-opt-v121{margin-top:8px;font-size:12px}.hps-opt-row-v121 input{min-width:110px}.hps-opt-spesifikasi{min-width:220px!important}
