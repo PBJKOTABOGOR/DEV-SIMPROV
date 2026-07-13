@@ -8958,6 +8958,7 @@ function enhancePlanningTableV126(){
   const panels=[...document.querySelectorAll('#contentArea .panel, #contentArea section')];
   const panel=panels.find(p=>p.querySelector('table')&&/Data Perencanaan|Persetujuan Perencanaan|Pemeriksaan Data Perencanaan/i.test(p.textContent||''));
   if(!panel)return;
+  panel.classList.add('planning-panel-v128');
   const table=panel.querySelector('table');
   if(!table)return;
   const headRow=table.querySelector('thead tr');
