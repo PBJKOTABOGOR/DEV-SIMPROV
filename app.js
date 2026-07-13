@@ -5612,7 +5612,7 @@ function tahapanDefFeV95(metode){
 
 dokumenKetentuanByMetode = function(metode){
   const m = String(metode || "").toUpperCase();
-  if(m === "BELANJA LANGSUNG") return ["Hasil Survey Harga","Spesifikasi Teknis dan HPS","Kuitansi / Nota / Invoice","Berita Acara Pemeriksaan Barang/Pekerjaan","Berita Acara Serah Terima","Faktur Pembelian","SPTJM","Surat Permohonan Pembayaran","Nota Dinas Pencairan","Surat Perintah Pembayaran"];
+  if(m === "BELANJA LANGSUNG") return ["Hasil Survey Harga","Spesifikasi Teknis dan HPS","Kuitansi / Nota / Invoice","Bukti Pembelian / Kwitansi","Berita Acara Pemeriksaan Barang/Pekerjaan","Berita Acara Serah Terima","Faktur Pembelian","SPTJM","Surat Permohonan Pembayaran","Nota Dinas Pencairan","Surat Perintah Pembayaran"];
   if(m === "PENGADAAN LANGSUNG" || m === "TENDER MANUAL"){
     const out = [];
     tahapanDefFeV95(m).forEach(t => t.dok.forEach(j => { if(!out.includes(j)) out.push(j); }));
@@ -8421,3 +8421,80 @@ renderDetailPencatatanV95=function(k){
     <section class="panel fade-up premium-panel"><div class="panel-head"><div><h3>Dokumen Wajib</h3></div></div>${dokumenTableV95(k,jenisList,'PGD')}</section>
     <section class="panel fade-up premium-panel"><div class="panel-head"><div><h3>Pencatatan Realisasi</h3></div></div>${catatHtml}</section>`;
 };
+
+
+/* =========================================================
+   SIMPROV v121 - Bukti Pembelian & Template HPS Opsional
+   Fokus Pencatatan Pengadaan; Non Pengadaan tidak diubah.
+   ========================================================= */
+function hpsOptionalRowV121(data){
+  data=data||{};
+  return `<tr class="hps-opt-row-v121">
+    <td><input class="hps-opt-uraian" value="${esc(data.uraian||'')}"></td>
+    <td><input class="hps-opt-spesifikasi" value="${esc(data.spesifikasi||'')}"></td>
+    <td><input class="hps-opt-vol" inputmode="decimal" value="${esc(String(data.vol||1))}" oninput="hitungHpsOptionalV121()"></td>
+    <td><input class="hps-opt-satuan" value="${esc(data.satuan||'Paket')}"></td>
+    <td><input class="hps-opt-harga" inputmode="numeric" value="${Number(data.harga||0).toLocaleString('id-ID')}" oninput="onRupiahInputV96(this);hitungHpsOptionalV121()"></td>
+    <td class="hps-opt-jumlah">${rupiah((Number(data.vol)||0)*(Number(data.harga)||0))}</td>
+    <td><button class="btn-red" type="button" onclick="this.closest('tr').remove();hitungHpsOptionalV121()">Hapus</button></td>
+  </tr>`;
+}
+function addHpsOptionalRowV121(){document.getElementById('hpsOptBodyV121')?.insertAdjacentHTML('beforeend',hpsOptionalRowV121());hitungHpsOptionalV121();}
+function hitungHpsOptionalV121(){
+  let total=0;
+  document.querySelectorAll('.hps-opt-row-v121').forEach(tr=>{
+    const v=parseFloat((tr.querySelector('.hps-opt-vol')?.value||'0').replace(',','.'))||0;
+    const h=toNumber(tr.querySelector('.hps-opt-harga')?.value||0); const t=v*h; total+=t;
+    const c=tr.querySelector('.hps-opt-jumlah'); if(c)c.textContent=rupiah(t);
+  });
+  const el=document.getElementById('hpsOptTotalV121');if(el)el.textContent=rupiah(total);return Math.round(total);
+}
+function collectHpsOptionalV121(){return [...document.querySelectorAll('.hps-opt-row-v121')].map(tr=>({
+  uraian:tr.querySelector('.hps-opt-uraian')?.value.trim()||'',
+  spesifikasi:tr.querySelector('.hps-opt-spesifikasi')?.value.trim()||'',
+  vol:parseFloat((tr.querySelector('.hps-opt-vol')?.value||'0').replace(',','.'))||0,
+  satuan:tr.querySelector('.hps-opt-satuan')?.value.trim()||'',
+  harga:toNumber(tr.querySelector('.hps-opt-harga')?.value||0),pajak:0,keterangan:''
+}));}
+function bukaHpsOptionalV121(id){
+  const k=kegiatanById(id)||{};
+  const proc=(dashboard?.prosesPengadaanV96||[]).find(x=>String(x.id_kegiatan)===String(id))||{};
+  let rows=[];const raw=String(proc.spesifikasi_teknis||'');
+  if(raw.startsWith('[HPSJSON]')){try{rows=JSON.parse(raw.slice(9))||[]}catch(e){}}
+  if(!rows.length)rows=[{uraian:k.nama_kegiatan||'',spesifikasi:k.keterangan||'',vol:toNumber(k.volume)||1,satuan:k.satuan||'Paket',harga:Math.round(toNumber(k.jumlah)/(toNumber(k.volume)||1))}];
+  const bidang=(dashboard?.bidang||dashboard?.bidangs||[]).find(b=>String(b.id_bidang)===String(k.id_bidang))||{};
+  const modal=document.createElement('div');modal.id='hpsOptionalModalV121';modal.className='modal';
+  modal.innerHTML=`<div class="modal-card modal-wide-v121"><div class="modal-head"><div><h3>Input Spesifikasi Teknis dan HPS</h3><p class="panel-sub">Template ini opsional. Dokumen tetap dapat diunggah manual.</p></div><button class="btn-soft" onclick="document.getElementById('hpsOptionalModalV121').remove()">Tutup</button></div>
+  <div class="form-grid"><div class="field"><label>Nomor Dokumen</label><input id="hpsOptNomorV121" placeholder="Nomor HPS"></div><div class="field"><label>Pejabat Penanda Tangan Komitmen</label><input id="hpsOptPejabatV121" value="${esc(bidang.pejabat_komitmen||'')}"></div><div class="field"><label>Nama Penyedia</label><input id="hpsOptPenyediaV121" value="${esc(proc.nama_penyedia_snapshot||'')}"></div></div>
+  <div class="panel-title-row"><h4>Rincian HPS</h4><button class="btn-soft" onclick="addHpsOptionalRowV121()">+ Tambah Baris</button></div>
+  <div class="table-wrap"><table class="hps-table-v105"><thead><tr><th>Uraian</th><th>Spesifikasi Barang</th><th>Volume</th><th>Satuan</th><th>Harga Satuan</th><th>Jumlah</th><th>Aksi</th></tr></thead><tbody id="hpsOptBodyV121">${rows.map(hpsOptionalRowV121).join('')}</tbody></table></div>
+  <div class="hps-grand-v105">TOTAL NILAI HPS <b id="hpsOptTotalV121">Rp 0</b></div>
+  <div class="action-group"><button class="btn-soft" onclick="simpanHpsOptionalV121('${esc(id)}',false)">Simpan Data HPS</button><button class="btn-green" onclick="simpanHpsOptionalV121('${esc(id)}',true)">Buat Template PDF</button></div></div>`;
+  document.body.appendChild(modal);setTimeout(hitungHpsOptionalV121,0);
+}
+async function simpanHpsOptionalV121(id,buatPdf){
+  const rows=collectHpsOptionalV121(), total=hitungHpsOptionalV121();
+  if(!rows.length||rows.some(x=>!x.uraian||!x.spesifikasi||!x.satuan||x.vol<=0||x.harga<=0)){alert('Lengkapi seluruh rincian HPS.');return;}
+  const k=kegiatanById(id)||{}; if(total>toNumber(k.jumlah)){alert('Total HPS tidak boleh melebihi nilai perencanaan.');return;}
+  const nomor=document.getElementById('hpsOptNomorV121')?.value.trim()||'';
+  const pejabat=document.getElementById('hpsOptPejabatV121')?.value.trim()||'';
+  const penyedia=document.getElementById('hpsOptPenyediaV121')?.value.trim()||'';
+  if(buatPdf&&(!nomor||!pejabat)){alert('Nomor dokumen dan pejabat penandatangan wajib diisi untuk membuat PDF.');return;}
+  showLoading(buatPdf?'Membuat template HPS...':'Menyimpan data HPS...');
+  try{
+    let r=await apiPost({action:'saveProsesPengadaanV96',user:currentUser,data:{id_kegiatan:id,jalur_proses:'PENCATATAN PENGADAAN',nama_penyedia_snapshot:penyedia,nilai_hps:total,spesifikasi_teknis:'[HPSJSON]'+JSON.stringify(rows)}});
+    if(!r.success)throw new Error(r.message||'Gagal menyimpan HPS');
+    if(buatPdf){r=await apiPost({action:'generateProcurementTemplateV101',user:currentUser,data:{id_kegiatan:id,jenis_template:'SPESIFIKASI DAN HPS',nomor_dokumen:nomor,pejabat_penandatangan:pejabat,nama_penyedia:penyedia||'-',nilai_hps:total}});if(!r.success)throw new Error(r.message||'Gagal membuat PDF');if(r.url_file)window.open(r.url_file,'_blank');}
+    await loadDashboard(false);document.getElementById('hpsOptionalModalV121')?.remove();renderAll();
+  }catch(e){alert(e.message||String(e));}finally{hideLoading();}
+}
+function pasangTombolHpsOptionalV121(k){
+  document.querySelectorAll('#contentArea tbody tr').forEach(tr=>{
+    const cells=tr.querySelectorAll('td');if(!cells.length)return;
+    if(dokKeyV94(cells[0].textContent)===dokKeyV94('Spesifikasi Teknis dan HPS')&&!tr.querySelector('.btn-hps-opt-v121')){
+      const btn=document.createElement('button');btn.type='button';btn.className='btn-soft btn-hps-opt-v121';btn.textContent='Buat Template HPS';btn.onclick=()=>bukaHpsOptionalV121(k.id_kegiatan);cells[0].appendChild(document.createElement('br'));cells[0].appendChild(btn);
+    }
+  });
+}
+const __renderDetailPencatatanV121Base=renderDetailPencatatanV95;
+renderDetailPencatatanV95=function(k){__renderDetailPencatatanV121Base(k);setTimeout(()=>pasangTombolHpsOptionalV121(k),0);};
