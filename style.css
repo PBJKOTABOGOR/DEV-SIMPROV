@@ -2651,3 +2651,10 @@ tr:has(.per-file-revision) td{
 @media(max-width:800px){.pipeline-pgd-v117{grid-template-columns:repeat(5,minmax(150px,1fr));overflow-x:auto}}
 
 .modal-wide-v121{width:min(1180px,96vw);max-height:92vh;overflow:auto}.btn-hps-opt-v121{margin-top:8px;font-size:12px}.hps-opt-row-v121 input{min-width:110px}.hps-opt-spesifikasi{min-width:220px!important}
+
+/* SIMPROV v122 */
+body.modal-open-v122{overflow:hidden}
+.hps-modal-backdrop-v122{position:fixed!important;inset:0!important;z-index:20000!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:18px!important;background:rgba(20,42,64,.42)!important;backdrop-filter:blur(7px)!important}
+.hps-modal-card-v122{position:relative!important;width:min(1240px,96vw)!important;max-height:92vh!important;overflow:auto!important;margin:0!important;box-shadow:0 28px 80px rgba(15,45,75,.28)!important}
+.hps-table-wrap-v122{max-height:45vh;overflow:auto}
+@media(max-width:720px){.hps-modal-backdrop-v122{padding:8px!important}.hps-modal-card-v122{width:98vw!important;max-height:96vh!important;padding:14px!important}}
