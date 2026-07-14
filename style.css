@@ -2860,3 +2860,119 @@ body.modal-open-v122{overflow:hidden}
   .surat-tabs-v133 button{width:100%;justify-content:center}
   .surat-editor-v134{min-height:200px}
 }
+
+/* =========================================================
+   SIMPROV v135 - Loading upload selalu terlihat + progress 0-100%
+   ========================================================= */
+#loadingOverlay{
+  z-index:2147483000!important;
+  isolation:isolate;
+}
+#loadingOverlay .loader-card{
+  width:min(390px,92vw)!important;
+}
+.loading-progress-wrap{
+  margin-top:18px;
+  width:100%;
+  text-align:left;
+}
+.loading-progress-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:7px;
+  color:#446176;
+  font-size:12px;
+}
+.loading-progress-head span{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  max-width:270px;
+}
+.loading-progress-head b{
+  color:#0b5f99;
+  font-size:13px;
+  flex:0 0 auto;
+}
+.loading-progress-track{
+  height:12px;
+  border-radius:999px;
+  background:#e6f0f7;
+  overflow:hidden;
+  border:1px solid #d1e2ee;
+  box-shadow:inset 0 1px 3px rgba(13,65,101,.08);
+}
+.loading-progress-track i{
+  display:block;
+  height:100%;
+  width:0;
+  border-radius:inherit;
+  background:linear-gradient(90deg,#0c70b0,#18a8d8,#19aa60);
+  box-shadow:0 0 12px rgba(24,168,216,.30);
+  transition:width .20s ease;
+}
+#loadingOverlay.upload-mode-v135 .loader-ring{
+  animation-duration:.85s;
+}
+#loadingOverlay.upload-mode-v135 .loader-logo-wrap{
+  animation-duration:.9s;
+}
+.modal-pl-v123{
+  z-index:1200000!important;
+}
+#confirmModalV133,
+.confirm-v133{
+  z-index:1300000!important;
+}
+@media(max-width:560px){
+  #loadingOverlay .loader-card{padding:24px 20px!important}
+  .loading-progress-head span{max-width:210px}
+}
+
+/* =========================================================
+   SIMPROV v136 - Surat terang, kartu ringkas, editor, pimpinan
+   ========================================================= */
+.surat-page-v136{display:grid;gap:16px}
+.surat-page-v136 button,
+.surat-page-v136 .btn-soft,
+.surat-page-v136 .btn-refresh,
+.surat-page-v136 .btn-green{background:linear-gradient(180deg,#fbfeff 0%,#e8f6ff 100%)!important;color:#15577f!important;border:1px solid #bddbed!important;box-shadow:0 5px 14px rgba(38,107,151,.09)!important}
+.surat-page-v136 button:hover{background:linear-gradient(180deg,#fff 0%,#daf1ff 100%)!important;transform:translateY(-1px)}
+.surat-page-v136 .btn-danger{background:linear-gradient(180deg,#fff8f7 0%,#ffe8e5 100%)!important;color:#a63a35!important;border:1px solid #f3c3bd!important;box-shadow:none!important}
+.surat-page-v136 .surat-submit-v136{background:linear-gradient(180deg,#effcf7 0%,#d5f5e7 100%)!important;color:#126840!important;border-color:#a9dfc5!important}
+.surat-page-v136 .surat-tabs-v133 button{min-width:150px;background:linear-gradient(180deg,#fff 0%,#edf8ff 100%)!important;color:#14577f!important;border:1px solid #c5dfef!important}
+.surat-page-v136 .surat-tabs-v133 button.active{background:linear-gradient(180deg,#dff4ff 0%,#c9ebfb 100%)!important;color:#0b5c8a!important;border-color:#8fc9e6!important;box-shadow:inset 0 -3px 0 #31a7d4,0 7px 16px rgba(40,126,174,.12)!important}
+.surat-page-v136 .surat-tabs-v133 button span{background:#fff!important;color:#0b6a9c!important;border:1px solid #b8dceb}
+.surat-form-v136{overflow:visible}
+.surat-editor-toolbar-v136{display:flex;flex-wrap:wrap;gap:7px;padding:10px 11px;border:1px solid #cfe1ed;border-bottom:0;border-radius:14px 14px 0 0;background:#f5fbff;position:sticky;top:0;z-index:2}
+.surat-editor-toolbar-v136 .editor-btn-v136{min-height:34px;padding:7px 11px!important;border-radius:9px!important;background:#fff!important;color:#174f75!important;border:1px solid #c9deeb!important;box-shadow:none!important;font-size:12px;font-weight:800}
+.surat-editor-toolbar-v136 .editor-btn-v136.clear{background:#fff1ef!important;color:#9b3a35!important;border-color:#f0c4bf!important;margin-left:auto}
+.surat-editor-v136{min-height:270px;padding:20px 22px;border:1px solid #cfe1ed;border-radius:0 0 14px 14px;background:#fff;color:#263d4f;line-height:1.65;outline:none;white-space:normal;overflow-wrap:anywhere}
+.surat-editor-v136:focus{border-color:#5fb7df;box-shadow:0 0 0 3px rgba(48,159,211,.12)}
+.surat-editor-v136 p{margin:0 0 12px}.surat-editor-v136 ul,.surat-editor-v136 ol{margin:0 0 12px 28px}
+.surat-package-list-v136{display:grid;gap:11px;margin-top:15px}
+.surat-package-card-v136{border:1px solid #d2e5f1;border-radius:15px;background:linear-gradient(135deg,#fff,#f8fcff);overflow:hidden;box-shadow:0 7px 18px rgba(34,83,119,.055)}
+.surat-package-card-v136>summary{list-style:none;display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:13px;align-items:center;padding:15px 17px;cursor:pointer;user-select:none}
+.surat-package-card-v136>summary::-webkit-details-marker{display:none}
+.surat-package-card-v136[open]>summary{background:#f1f9fe;border-bottom:1px solid #d5e7f2}
+.surat-number-v136{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:#e0f3ff;color:#0d6d9f;font-weight:900;border:1px solid #b9dff1}
+.surat-summary-title-v136{min-width:0;display:grid;gap:3px}
+.surat-summary-title-v136>b{color:#123f6d;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.surat-summary-title-v136 small{color:#71869a;font-size:11px}.surat-summary-title-v136 em{color:#47697f;font-size:11px;font-style:normal}
+.surat-package-detail-v136{padding:15px 17px 17px;background:#fff}
+.surat-package-detail-v136 .surat-pipeline-v133{margin-top:0}
+.surat-count-v136{display:inline-flex;padding:7px 11px;border-radius:999px;background:#edf8ff;color:#17618e;border:1px solid #cce3f1;font-size:12px;font-weight:800}
+.surat-inbox-v136 .surat-package-card-v136{border-left:4px solid #74bde0}
+.surat-route-note-v136{grid-column:1/-1;padding:11px 13px;border-radius:11px;background:#eef9ff;border:1px solid #c6e5f5;color:#245f80;font-size:12px}
+.pimpinan-bidang-panel-v136{margin-bottom:16px}
+.pimpinan-bidang-grid-v136{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:11px;margin-top:15px}
+.pimpinan-bidang-card-v136{display:grid;grid-template-columns:minmax(150px,.9fr) minmax(180px,1.1fr);gap:12px;align-items:center;padding:13px;border:1px solid #d7e6f0;border-radius:14px;background:#fbfdff}
+.pimpinan-bidang-card-v136 span{display:grid;gap:3px}.pimpinan-bidang-card-v136 b{color:#143f6c}.pimpinan-bidang-card-v136 small{color:#7b8ea0;font-size:10px}
+.pimpinan-bidang-card-v136 input{width:100%;min-width:0}
+@media(max-width:780px){
+  .surat-package-card-v136>summary{grid-template-columns:38px minmax(0,1fr);padding:13px}.surat-package-card-v136>summary>.surat-status-v133{grid-column:2;justify-self:start}
+  .surat-summary-title-v136>b{white-space:normal}.surat-editor-toolbar-v136{position:static}.surat-editor-v136{min-height:230px;padding:16px}
+  .pimpinan-bidang-card-v136{grid-template-columns:1fr}.surat-page-v136 .surat-tabs-v133 button{width:auto;min-width:130px}
+}
