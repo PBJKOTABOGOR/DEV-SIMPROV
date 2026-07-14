@@ -7,7 +7,7 @@
 
   <link rel="icon" type="image/png" href="favicon.png" />
   <link rel="apple-touch-icon" href="logo-siporbo.png" />
-  <link rel="stylesheet" href="style.css?v=133-surat-role-fast" />
+  <link rel="stylesheet" href="style.css?v=136-surat-ttd-pimpinan" />
 </head>
 <body>
   <div class="bg-orb orb-a"></div>
@@ -23,7 +23,11 @@
         </div>
       </div>
       <b id="loadingText">Memproses...</b>
-      <small>Mohon tunggu sebentar</small>
+      <small id="loadingSubtext">Mohon tunggu sebentar</small>
+      <div id="loadingProgressWrap" class="loading-progress-wrap hidden" aria-live="polite">
+        <div class="loading-progress-head"><span id="loadingProgressDetail">Menyiapkan proses...</span><b id="loadingProgressPercent">0%</b></div>
+        <div class="loading-progress-track"><i id="loadingProgressBar" style="width:0%"></i></div>
+      </div>
     </div>
   </div>
 
@@ -106,6 +110,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=133-surat-role-fast"></script>
+  <script src="app.js?v=136-surat-ttd-pimpinan"></script>
 </body>
 </html>
