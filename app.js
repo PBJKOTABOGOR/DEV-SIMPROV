@@ -9522,3 +9522,448 @@ function formatDate(v){
     w.document.close();
   };
 })();
+
+/* =========================================================
+   SIMPROV v135 - Upload maksimal, progress 0-100%, modal di atas,
+   verifikasi Pengadaan Langsung realtime, hapus dokumen duplikat.
+   ========================================================= */
+(function(){
+  const MAX_UPLOAD_CONCURRENCY_V135 = 3;
+  const uploadBusyV135 = new Set();
+  let progressPulseV135 = null;
+  let progressValueV135 = 0;
+  let hideLoadingTimerV135 = null;
+
+  function ensureLoadingProgressV135(){
+    const overlay=document.getElementById('loadingOverlay');
+    const card=overlay?.querySelector('.loader-card');
+    if(!overlay||!card)return null;
+    let wrap=document.getElementById('loadingProgressWrap');
+    if(!wrap){
+      wrap=document.createElement('div');
+      wrap.id='loadingProgressWrap';
+      wrap.className='loading-progress-wrap hidden';
+      wrap.innerHTML='<div class="loading-progress-head"><span id="loadingProgressDetail">Menyiapkan proses...</span><b id="loadingProgressPercent">0%</b></div><div class="loading-progress-track"><i id="loadingProgressBar" style="width:0%"></i></div>';
+      card.appendChild(wrap);
+    }
+    return wrap;
+  }
+  function stopProgressPulseV135(){if(progressPulseV135){clearInterval(progressPulseV135);progressPulseV135=null;}}
+  function setLoadingProgressV135(percent,detail,force=false){
+    const wrap=ensureLoadingProgressV135();if(!wrap)return;
+    let p=Math.max(0,Math.min(100,Math.round(Number(percent)||0)));
+    if(!force&&p<progressValueV135)p=progressValueV135;
+    progressValueV135=p;
+    wrap.classList.remove('hidden');
+    const bar=document.getElementById('loadingProgressBar'),pct=document.getElementById('loadingProgressPercent'),det=document.getElementById('loadingProgressDetail');
+    if(bar)bar.style.width=p+'%';if(pct)pct.textContent=p+'%';if(det&&detail)det.textContent=detail;
+  }
+  function startProgressPulseV135(max=92){
+    stopProgressPulseV135();
+    progressPulseV135=setInterval(()=>{
+      if(progressValueV135>=max)return;
+      const step=progressValueV135<35?2:progressValueV135<70?1:.5;
+      setLoadingProgressV135(Math.min(max,progressValueV135+step),'Memproses file di server...');
+    },350);
+  }
+  function showProgressLoadingV135(text,{upload=true,detail='Menyiapkan file...'}={}){
+    if(hideLoadingTimerV135){clearTimeout(hideLoadingTimerV135);hideLoadingTimerV135=null;}
+    stopProgressPulseV135();progressValueV135=0;
+    const overlay=document.getElementById('loadingOverlay');
+    const txt=document.getElementById('loadingText'),sub=document.getElementById('loadingSubtext');
+    if(txt)txt.textContent=text||'Memproses...';if(sub)sub.textContent=upload?'Jangan tutup halaman sampai proses selesai':'Mohon tunggu sebentar';
+    overlay?.classList.remove('hidden');overlay?.classList.toggle('upload-mode-v135',!!upload);
+    setLoadingProgressV135(0,detail,true);
+  }
+  async function finishProgressLoadingV135(detail='Selesai'){
+    stopProgressPulseV135();setLoadingProgressV135(100,detail,true);
+    await new Promise(r=>setTimeout(r,150));
+    document.getElementById('loadingOverlay')?.classList.add('hidden');
+    document.getElementById('loadingOverlay')?.classList.remove('upload-mode-v135');
+  }
+  function failProgressLoadingV135(){
+    stopProgressPulseV135();
+    document.getElementById('loadingOverlay')?.classList.add('hidden');
+    document.getElementById('loadingOverlay')?.classList.remove('upload-mode-v135');
+  }
+
+  const showLoadingV135Base=showLoading;
+  showLoading=function(text='Memproses...'){
+    const isUpload=/upload|unggah|mengunggah/i.test(String(text));
+    if(isUpload){showProgressLoadingV135(text,{upload:true});return;}
+    stopProgressPulseV135();progressValueV135=0;
+    ensureLoadingProgressV135()?.classList.add('hidden');
+    document.getElementById('loadingOverlay')?.classList.remove('upload-mode-v135');
+    return showLoadingV135Base(text);
+  };
+  const hideLoadingV135Base=hideLoading;
+  hideLoading=function(){stopProgressPulseV135();return hideLoadingV135Base();};
+
+  /* Fungsi lama yang menulis teks "1/8" otomatis ikut menggerakkan garis progres. */
+  const loadingTextV135=document.getElementById('loadingText');
+  if(loadingTextV135&&typeof MutationObserver!=='undefined'){
+    new MutationObserver(()=>{
+      const overlay=document.getElementById('loadingOverlay');
+      if(!overlay||!overlay.classList.contains('upload-mode-v135'))return;
+      const text=loadingTextV135.textContent||'';
+      const m=text.match(/(\d+)\s*\/\s*(\d+)/);
+      if(m){const cur=Number(m[1]),tot=Math.max(1,Number(m[2]));setLoadingProgressV135(Math.min(94,Math.round(((cur-1)/tot)*90)),text);}
+    }).observe(loadingTextV135,{childList:true,characterData:true,subtree:true});
+  }
+
+  async function fastUploadBatchV135(items,{key='default',title='Mengunggah dokumen...',handler,onSuccess}={}){
+    if(uploadBusyV135.has(key)){alert('Proses upload yang sama masih berjalan. Tunggu sampai selesai.');return {ok:0,gagal:['Upload masih berjalan']};}
+    if(!items.length)return {ok:0,gagal:[]};
+    const oversized=items.find(x=>x.file&&Number(x.file.size||0)>MAX_UPLOAD_BYTES_V133);
+    if(oversized){alert(`File ${oversized.file.name} melebihi 2 MB.`);return {ok:0,gagal:[oversized.file.name]};}
+    uploadBusyV135.add(key);showProgressLoadingV135(title,{upload:true,detail:'Membaca file 0/'+items.length});
+    try{
+      let prepDone=0;
+      const prepared=await Promise.all(items.map(async item=>{
+        const base64=await fileToBase64(item.file);
+        prepDone++;setLoadingProgressV135(Math.round((prepDone/items.length)*20),`Membaca file ${prepDone}/${items.length}: ${item.file.name}`);
+        return {...item,base64};
+      }));
+      let cursor=0,done=0,ok=0;const gagal=[],results=[];
+      startProgressPulseV135(92);
+      const worker=async()=>{
+        while(true){
+          const idx=cursor++;if(idx>=prepared.length)return;
+          const item=prepared[idx];
+          const txt=document.getElementById('loadingText');if(txt)txt.textContent=`Mengunggah ${idx+1}/${prepared.length}: ${item.label||item.file.name}`;
+          try{
+            const r=await handler(item,idx);
+            if(!r?.success)throw new Error(r?.message||'Upload gagal');
+            ok++;results.push({item,response:r});if(onSuccess)onSuccess(item,r);
+          }catch(e){gagal.push(`${item.label||item.file.name}: ${e.message||e}`);}
+          finally{done++;setLoadingProgressV135(20+Math.round((done/prepared.length)*80),`Selesai ${done}/${prepared.length} file`);}
+        }
+      };
+      await Promise.all(Array.from({length:Math.min(MAX_UPLOAD_CONCURRENCY_V135,prepared.length)},worker));
+      await finishProgressLoadingV135(gagal.length?`${ok} berhasil, ${gagal.length} gagal`:`${ok} file berhasil diunggah`);
+      return {ok,gagal,results};
+    }catch(e){failProgressLoadingV135();throw e;}
+    finally{uploadBusyV135.delete(key);}
+  }
+
+  function setKegiatanUploadStatusV135(id,status='MENUNGGU VERIFIKASI DOKUMEN'){
+    const k=kegiatanById(id);if(k)k.status_pencairan=status;
+  }
+  function localUploadSuccessV135(ctx,isRevisi,idDok,r){if(r?.dokumen)updateDokumenLokalV111(ctx,isRevisi,idDok,r.dokumen);}
+
+  uploadSemuaDokV96=async function(idKegiatan){
+    const inputs=Array.from(document.querySelectorAll('.dok-file-v96')).filter(f=>f.files?.length);
+    if(!inputs.length){alert('Pilih file pada baris dokumen terlebih dahulu.');return;}
+    const items=inputs.map(inp=>({inp,file:inp.files[0],label:inp.dataset.jenis||inp.files[0].name,ctx:inp.dataset.ctx||'PGD',isRevisi:inp.dataset.repair==='1'&&!!inp.dataset.idd,idDok:inp.dataset.idd||''}));
+    try{
+      const result=await fastUploadBatchV135(items,{key:'dok-stage-'+idKegiatan,title:`Mengunggah ${items.length} dokumen...`,handler:async item=>{
+        if(item.isRevisi)return item.ctx==='NON'
+          ?apiPost({action:'revisiDokumenNonPengadaan',user:currentUser,id_dokumen_non:item.idDok,file_name:item.file.name,mime_type:item.file.type,file_base64:item.base64})
+          :apiPost({action:'revisiDokumen',user:currentUser,id_dokumen:item.idDok,file_name:item.file.name,mime_type:item.file.type,file_base64:item.base64});
+        return apiPost({action:item.ctx==='NON'?'uploadDokumenNonPengadaan':'uploadDokumen',user:currentUser,id_kegiatan:idKegiatan,jenis_dokumen:item.label,file_name:item.file.name,mime_type:item.file.type,file_base64:item.base64});
+      },onSuccess:(item,r)=>localUploadSuccessV135(item.ctx,item.isRevisi,item.idDok,r)});
+      if(result.ok){setKegiatanUploadStatusV135(idKegiatan);writeDashboardCache(dashboard);refreshActivePLStageV135(idKegiatan);if(!document.getElementById('modalPLV123'))renderAll();syncDashboardSilentV111();}
+      alert(`${result.ok} dokumen berhasil diunggah.${result.gagal.length?`\n\nGagal:\n- ${result.gagal.join('\n- ')}`:''}`);
+    }catch(e){alert('Gagal mengunggah dokumen: '+(e.message||e));}
+  };
+
+  uploadDokumen=async function(){
+    const idKegiatan=document.getElementById('dokKegiatan')?.value;
+    if(!idKegiatan){alert('Tidak ada kegiatan yang bisa diunggah.');return;}
+    const rows=[...document.querySelectorAll('.doc-upload-row')];
+    const items=rows.map(row=>({jenis:row.querySelector('.jenisDok')?.value||'',file:row.querySelector('.fileDok')?.files?.[0]})).filter(x=>x.file);
+    if(!items.length){alert('Pilih minimal 1 file dokumen.');return;}
+    const picked=new Set();for(const item of items){const k=docTypeKey(item.jenis);if(!k||picked.has(k)){alert('Setiap jenis dokumen hanya boleh dipilih satu kali.');return;}picked.add(k);}
+    try{
+      const result=await fastUploadBatchV135(items.map(x=>({...x,label:x.jenis})),{key:'pencairan-'+idKegiatan,title:`Mengunggah ${items.length} dokumen pencairan...`,handler:item=>apiPost({action:'uploadDokumen',user:currentUser,id_kegiatan:idKegiatan,jenis_dokumen:item.jenis,file_name:item.file.name,mime_type:item.file.type,file_base64:item.base64}),onSuccess:(item,r)=>localUploadSuccessV135('PGD',false,'',r)});
+      if(result.ok){setKegiatanUploadStatusV135(idKegiatan);writeDashboardCache(dashboard);renderAll();syncDashboardSilentV111();}
+      alert(`${result.ok} dokumen berhasil diunggah.${result.gagal.length?`\nGagal:\n- ${result.gagal.join('\n- ')}`:''}`);
+    }catch(e){alert(e.message||'Gagal upload dokumen.');}
+  };
+
+  uploadAllNonV83=async function(){
+    const id=document.getElementById('nonKegiatanV83')?.value;if(!id){alert('Pilih kegiatan Non Pengadaan terlebih dahulu.');return;}
+    const selected=[...document.querySelectorAll('.non-upload-row-v83')].map(r=>({jenis:r.querySelector('.jenisNonDokV83')?.value,file:r.querySelector('.fileNonDokV83')?.files?.[0]})).filter(x=>x.file);
+    if(!selected.length){alert('Pilih minimal satu file dokumen.');return;}
+    try{
+      const result=await fastUploadBatchV135(selected.map(x=>({...x,label:x.jenis})),{key:'non-'+id,title:`Mengunggah ${selected.length} dokumen Non Pengadaan...`,handler:item=>apiPost({action:'uploadDokumenNonPengadaan',user:currentUser,id_kegiatan:id,jenis_dokumen:item.jenis,file_name:item.file.name,mime_type:item.file.type,file_base64:item.base64}),onSuccess:(item,r)=>localUploadSuccessV135('NON',false,'',r)});
+      if(result.ok){setKegiatanUploadStatusV135(id);writeDashboardCache(dashboard);activeMenu='Non Pengadaan';renderAll();syncDashboardSilentV111();}
+      alert(`${result.ok} dokumen Non Pengadaan berhasil diunggah.${result.gagal.length?`\nGagal:\n- ${result.gagal.join('\n- ')}`:''}`);
+    }catch(e){alert(e.message||e);}
+  };
+
+  uploadNonV79=async function(id){
+    const file=document.getElementById('fileNon_'+id)?.files?.[0],jenis=document.getElementById('jenisNon_'+id)?.value;if(!file){alert('Pilih file terlebih dahulu');return;}
+    try{const result=await fastUploadBatchV135([{file,jenis,label:jenis}],{key:'non-single-'+id+'-'+jenis,title:'Mengunggah '+jenis+'...',handler:item=>apiPost({action:'uploadDokumenNonPengadaan',user:currentUser,id_kegiatan:id,jenis_dokumen:item.jenis,file_name:item.file.name,mime_type:item.file.type,file_base64:item.base64}),onSuccess:(item,r)=>localUploadSuccessV135('NON',false,'',r)});if(result.ok){writeDashboardCache(dashboard);renderAll();syncDashboardSilentV111();}alert(result.ok?'Dokumen berhasil diunggah.':result.gagal.join('\n'));}catch(e){alert(e.message||e);}
+  };
+  uploadInlineNonV93=async function(id,jenis){
+    if(!canCreateHonorV93())return;
+    const input=document.getElementById(`inlineNonFileV93_${CSS.escape(String(id))}_${jenis==='Tanda Terima'?'tt':'bp'}`),file=input?.files?.[0];if(!file){alert(`Pilih file ${jenis} terlebih dahulu.`);return;}
+    try{const result=await fastUploadBatchV135([{file,jenis,label:jenis}],{key:'non-inline-'+id+'-'+jenis,title:'Mengunggah '+jenis+'...',handler:item=>apiPost({action:'uploadDokumenNonPengadaan',user:currentUser,id_kegiatan:id,jenis_dokumen:item.jenis,file_name:item.file.name,mime_type:item.file.type,file_base64:item.base64}),onSuccess:(item,r)=>localUploadSuccessV135('NON',false,'',r)});if(result.ok){activeMenu='Non Pengadaan';writeDashboardCache(dashboard);renderAll();syncDashboardSilentV111();}alert(result.ok?'Dokumen berhasil diunggah.':result.gagal.join('\n'));}catch(e){alert(e.message||e);}
+  };
+  uploadDokTahapV94=async function(idKegiatan,tahap){
+    const jenis=document.getElementById(`plJenis-${idKegiatan}-${tahap}`)?.value,file=document.getElementById(`plFile-${idKegiatan}-${tahap}`)?.files?.[0];if(!jenis||!file){alert('Pilih jenis dokumen dan file dulu.');return;}
+    try{const result=await fastUploadBatchV135([{file,jenis,label:jenis}],{key:'tahap-'+idKegiatan+'-'+tahap,title:'Mengunggah dokumen tahap '+tahap+'...',handler:item=>apiPost({action:'uploadDokumen',user:currentUser,id_kegiatan:idKegiatan,jenis_dokumen:item.jenis,file_name:item.file.name,mime_type:item.file.type,file_base64:item.base64}),onSuccess:(item,r)=>localUploadSuccessV135('PGD',false,'',r)});if(result.ok){writeDashboardCache(dashboard);renderAll();syncDashboardSilentV111();}alert(result.ok?'Dokumen berhasil diunggah.':result.gagal.join('\n'));}catch(e){alert(e.message||e);}
+  };
+  uploadDokBLV95=async function(id){
+    const jenis=document.getElementById('blJenisDokV95')?.value,file=document.getElementById('blFileDokV95')?.files?.[0];if(!jenis||!file){alert('Pilih jenis dokumen dan file dulu.');return;}
+    try{const result=await fastUploadBatchV135([{file,jenis,label:jenis}],{key:'bl-'+id+'-'+jenis,title:'Mengunggah dokumen...',handler:item=>apiPost({action:'uploadDokumen',user:currentUser,id_kegiatan:id,jenis_dokumen:item.jenis,file_name:item.file.name,mime_type:item.file.type,file_base64:item.base64}),onSuccess:(item,r)=>localUploadSuccessV135('PGD',false,'',r)});if(result.ok){writeDashboardCache(dashboard);renderAll();syncDashboardSilentV111();}alert(result.ok?'Dokumen berhasil diunggah.':result.gagal.join('\n'));}catch(e){alert(e.message||e);}
+  };
+
+  /* Hilangkan Bukti Pembelian/Kwitansi sebagai syarat terpisah. */
+  const duplicateKeyV135=dokKeyV94('Bukti Pembelian / Kwitansi');
+  const pembayaranV135=(typeof TAHAPAN_PL_V94!=='undefined'?TAHAPAN_PL_V94:[]).find(x=>Number(x.no)===7);
+  if(pembayaranV135)pembayaranV135.dok=pembayaranV135.dok.filter(x=>dokKeyV94(x)!==duplicateKeyV135);
+  const tahapanDefV135Base=tahapanDefFeV95;
+  tahapanDefFeV95=function(metode){return tahapanDefV135Base(metode).map(t=>({...t,dok:(t.dok||[]).filter(x=>dokKeyV94(x)!==duplicateKeyV135)}));};
+
+  /* Simpan konteks popup tahap agar sesudah verifikasi dapat dirender ulang tanpa reload penuh. */
+  const openTahapPLV135Base=openTahapPLV123;
+  openTahapPLV123=function(id,no){const r=openTahapPLV135Base(id,no);if(document.getElementById('modalPLV123'))window.__activePLStageV135={id:String(id),no:Number(no)};return r;};
+  const closeModalPLV135Base=closeModalPLV123;
+  closeModalPLV123=function(){closeModalPLV135Base();window.__activePLStageV135=null;};
+  function refreshActivePLStageV135(id){
+    const k=kegiatanById(id);if(!k)return;
+    if(activeMenu==='Pengadaan Langsung'&&String(paketAktifV95||'')===String(id))renderDetailPengadaanLangsungV123(k);
+    const ctx=window.__activePLStageV135;
+    if(ctx&&String(ctx.id)===String(id)){const no=ctx.no;openTahapPLV135Base(id,no);window.__activePLStageV135={id:String(id),no:Number(no)};}
+  }
+  window.refreshActivePLStageV135=refreshActivePLStageV135;
+
+  function findDocLocalV135(id,ctx){
+    const key=ctx==='NON'?'dokumenNonPengadaan':'dokumen',field=ctx==='NON'?'id_dokumen_non':'id_dokumen';
+    return (dashboard?.[key]||[]).find(d=>String(d[field])===String(id));
+  }
+  function applyVerificationLocalV135(id,status,ctx,catatan){
+    const d=findDocLocalV135(id,ctx);if(!d)return null;
+    const valid=status==='VALID';d.status_verifikasi=valid?'VALID DOKUMEN':'PERBAIKAN DOKUMEN';
+    d.catatan_admin=catatan||'';d.catatan_verifikator=catatan||'';d.catatan_Verifikator=catatan||'';d.tanggal_verifikasi=new Date().toISOString();d.verifikasi_by=currentUser?.nama||currentUser?.username||'Verifikator';
+    const note=`${new Date().toLocaleString('id-ID')} - ${d.verifikasi_by}: ${valid?'Dokumen valid':'Perbaikan diminta'+(catatan?' - '+catatan:'')}`;
+    d.riwayat_dokumen=d.riwayat_dokumen?d.riwayat_dokumen+'\n'+note:note;
+    return d;
+  }
+  function refreshAfterVerificationV135(d){
+    if(!d)return;
+    writeDashboardCache(dashboard);
+    if(document.getElementById('modalPLV123'))refreshActivePLStageV135(d.id_kegiatan);
+    else renderAll();
+    syncDashboardSilentV111();
+  }
+
+  verifDokV96=async function(idDok,status,ctx){
+    let catatan='';
+    if(status==='PERBAIKAN'){catatan=prompt('Alasan perbaikan (wajib):')||'';if(!catatan.trim()){alert('Alasan perbaikan wajib diisi.');return;}}
+    const ok=await confirmActionV133({title:status==='VALID'?'Validasi Dokumen':'Minta Perbaikan Dokumen',message:status==='VALID'?'Dokumen akan dinyatakan valid dan progres paket langsung diperbarui.':'Dokumen akan dikembalikan kepada User Bidang untuk diperbaiki.',confirmText:status==='VALID'?'Ya, Validasi':'Ya, Minta Perbaikan',danger:status==='PERBAIKAN'});if(!ok)return;
+    showProgressLoadingV135(status==='VALID'?'Memvalidasi dokumen...':'Mengirim permintaan perbaikan...',{upload:false,detail:'Mengirim keputusan ke server...'});startProgressPulseV135(92);
+    try{
+      const r=ctx==='NON'
+        ?await apiPost({action:'verifyDokumenNonPengadaan',user:currentUser,id_dokumen_non:idDok,status_verifikasi:status==='VALID'?'VALID DOKUMEN':'PERBAIKAN DOKUMEN',catatan_verifikator:catatan})
+        :await apiPost({action:'verifyDokumen',user:currentUser,id_dokumen:idDok,status_verifikasi:status,catatan_admin:catatan});
+      if(!r.success)throw new Error(r.message||'Gagal memperbarui dokumen');
+      const d=applyVerificationLocalV135(idDok,status,ctx,catatan);refreshAfterVerificationV135(d);
+      await finishProgressLoadingV135('Status dokumen berhasil diperbarui');alert(r.message||'Status dokumen diperbarui');
+    }catch(e){failProgressLoadingV135();alert('Gagal: '+(e.message||e));}
+  };
+
+  revisiDokumen=async function(idDokumen){
+    const input=document.getElementById(`revisi_${idDokumen}`),file=input?.files?.[0];if(!file){alert('Pilih file pengganti terlebih dahulu.');return;}
+    try{const result=await fastUploadBatchV135([{file,label:file.name,idDok:idDokumen}],{key:'revisi-'+idDokumen,title:'Mengunggah ulang dokumen...',handler:item=>apiPost({action:'revisiDokumen',user:currentUser,id_dokumen:item.idDok,file_name:item.file.name,mime_type:item.file.type,file_base64:item.base64}),onSuccess:(item,r)=>localUploadSuccessV135('PGD',true,item.idDok,r)});if(result.ok){writeDashboardCache(dashboard);const d=findDocLocalV135(idDokumen,'PGD');if(d&&document.getElementById('modalPLV123'))refreshActivePLStageV135(d.id_kegiatan);else renderAll();syncDashboardSilentV111();}alert(result.ok?'Dokumen perbaikan berhasil diunggah.':result.gagal.join('\n'));}catch(e){alert(e.message||'Gagal upload ulang file dokumen.');}
+  };
+  revisiNonDokumenV90=async function(id){
+    const input=document.getElementById('revisiNon_'+id),file=input?.files?.[0];if(!file){alert('Pilih file perbaikan terlebih dahulu.');return;}
+    try{const result=await fastUploadBatchV135([{file,label:file.name,idDok:id}],{key:'revisi-non-'+id,title:'Mengunggah perbaikan dokumen...',handler:item=>apiPost({action:'revisiDokumenNonPengadaan',user:currentUser,id_dokumen_non:item.idDok,file_name:item.file.name,mime_type:item.file.type,file_base64:item.base64}),onSuccess:(item,r)=>localUploadSuccessV135('NON',true,item.idDok,r)});if(result.ok){writeDashboardCache(dashboard);renderAll();syncDashboardSilentV111();}alert(result.ok?'Dokumen perbaikan berhasil diunggah.':result.gagal.join('\n'));}catch(e){alert(e.message||e);}
+  };
+
+  bulkVerifV108=async function(status){
+    const ceks=[...document.querySelectorAll('.dok-cek-v108[data-idd]:checked')];if(!ceks.length){alert('Ceklis dulu dokumen yang mau diverifikasi.');return;}
+    let catatan='';if(status==='PERBAIKAN'){catatan=prompt('Alasan perbaikan untuk '+ceks.length+' dokumen terpilih (wajib):')||'';if(!catatan.trim()){alert('Alasan perbaikan wajib diisi.');return;}}
+    const yakin=await confirmActionV133({title:status==='VALID'?'Validasi Dokumen Terpilih':'Minta Perbaikan Dokumen',message:`${ceks.length} dokumen akan diproses sekaligus dan tampilan diperbarui langsung.`,confirmText:status==='VALID'?'Ya, Validasi Semua':'Ya, Kembalikan',danger:status==='PERBAIKAN'});if(!yakin)return;
+    showProgressLoadingV135('Memproses verifikasi dokumen...',{upload:false,detail:'0/'+ceks.length+' dokumen'});startProgressPulseV135(92);
+    let cursor=0,done=0,ok=0;const gagal=[],affected=new Set();
+    const worker=async()=>{while(true){const i=cursor++;if(i>=ceks.length)return;const c=ceks[i],idd=c.dataset.idd,ctx=c.dataset.ctx;try{const r=ctx==='NON'?await apiPost({action:'verifyDokumenNonPengadaan',user:currentUser,id_dokumen_non:idd,status_verifikasi:status==='VALID'?'VALID DOKUMEN':'PERBAIKAN DOKUMEN',catatan_verifikator:catatan}):await apiPost({action:'verifyDokumen',user:currentUser,id_dokumen:idd,status_verifikasi:status,catatan_admin:catatan});if(!r.success)throw new Error(r.message||'gagal');ok++;const d=applyVerificationLocalV135(idd,status,ctx,catatan);if(d)affected.add(String(d.id_kegiatan));}catch(e){gagal.push(e.message||String(e));}finally{done++;setLoadingProgressV135(Math.round((done/ceks.length)*100),`${done}/${ceks.length} dokumen selesai`);}}};
+    try{await Promise.all(Array.from({length:Math.min(3,ceks.length)},worker));writeDashboardCache(dashboard);const id=[...affected][0];if(id&&document.getElementById('modalPLV123'))refreshActivePLStageV135(id);else renderAll();syncDashboardSilentV111();await finishProgressLoadingV135(`${ok} dokumen berhasil diproses`);alert(`${ok} dokumen berhasil ${status==='VALID'?'divalidasi':'dikembalikan untuk perbaikan'}.${gagal.length?`\nGagal:\n- ${gagal.join('\n- ')}`:''}`);}catch(e){failProgressLoadingV135();alert(e.message||e);}
+  };
+})();
+
+/* =========================================================
+   SIMPROV v136 - UI Surat terang, editor Nota Dinas,
+   kartu surat ringkas, TTD pengirim, dan pimpinan bidang.
+   ========================================================= */
+(function(){
+  function sanitizeSuratHtmlV136(html){
+    let out=String(html||'').replace(/<script[\s\S]*?<\/script>/gi,'').replace(/on\w+\s*=\s*"[^"]*"/gi,'').replace(/on\w+\s*=\s*'[^']*'/gi,'').replace(/javascript:/gi,'');
+    out=out.replace(/<(?!\/?(p|br|b|strong|i|em|u|ul|ol|li|div)\b)[^>]+>/gi,'');
+    out=out.replace(/<(div)([^>]*)>/gi,'<$1>');
+    return out.trim();
+  }
+  function stripSuratHtmlV136(html){
+    const d=document.createElement('div');d.innerHTML=String(html||'');return (d.textContent||'').replace(/\s+/g,' ').trim();
+  }
+  function suratDateValueV136(s){
+    const v=s?.created_at||s?.tanggal_surat||s?.updated_at||'';const t=new Date(v).getTime();return Number.isFinite(t)?t:Number(s?._row||0);
+  }
+  function sortSuratOldestV136(list){return [...(list||[])].sort((a,b)=>suratDateValueV136(a)-suratDateValueV136(b)||Number(a?._row||0)-Number(b?._row||0));}
+  function isCombinedClassV136(v){const k=String(v||'').toUpperCase().replace(/[+&]/g,' DAN ').replace(/_/g,' ').replace(/\s+/g,' ').trim();return k==='UMUM DAN PENCAIRAN'||k==='GABUNGAN';}
+  function roleListV136(v){return String(v||'').toUpperCase().split(/[,;+|]/).map(x=>x.trim()).filter(Boolean);}
+  function bidangSuratV136(id){return (suratWorkspaceV133?.bidangs||[]).find(b=>String(b.id_bidang)===String(id))||{};}
+  function senderSignatureNameV136(s){return s?.pengirim_ttd_nama||bidangSuratV136(s?.asal_bidang)?.nama_pimpinan_bidang||s?.asal_nama||'-';}
+  function klasifikasiLabelV136(v){if(isCombinedClassV136(v))return 'Umum / Disposisi Bidang + Pencairan';return String(v||'UMUM').toUpperCase()==='PENCAIRAN'?'Pencairan':'Umum / Disposisi Bidang';}
+
+  window.execSuratEditorV136=function(cmd,value=null){
+    const ed=document.getElementById('suratIsiEditorV136');if(!ed)return;ed.focus();
+    try{document.execCommand(cmd,false,value);}catch(e){console.warn('Editor command gagal',cmd,e);}
+    updateSuratPreviewValueV136();
+  };
+  window.clearSuratEditorV136=function(){
+    const ed=document.getElementById('suratIsiEditorV136');if(!ed)return;
+    if(stripSuratHtmlV136(ed.innerHTML)&&!window.confirm('Kosongkan seluruh isi Nota Dinas?'))return;
+    ed.innerHTML='<p><br></p>';ed.focus();updateSuratPreviewValueV136();
+  };
+  window.removeSuratFormatV136=function(){
+    const ed=document.getElementById('suratIsiEditorV136');if(!ed)return;ed.focus();
+    try{document.execCommand('removeFormat',false,null);}catch(e){}
+    updateSuratPreviewValueV136();
+  };
+  window.handleSuratEditorKeydownV136=function(event){
+    if(event.key!=='Tab')return;
+    event.preventDefault();
+    const sel=window.getSelection();let node=sel?.anchorNode;
+    if(node?.nodeType===3)node=node.parentElement;
+    const li=node?.closest?.('li');
+    if(li){try{document.execCommand(event.shiftKey?'outdent':'indent',false,null);}catch(e){};updateSuratPreviewValueV136();return;}
+    if(event.shiftKey)return;
+    try{document.execCommand('insertHTML',false,'&nbsp;&nbsp;&nbsp;&nbsp;');}catch(e){document.execCommand('insertText',false,'    ');}
+    updateSuratPreviewValueV136();
+  };
+  window.updateSuratPreviewValueV136=function(){
+    const hidden=document.getElementById('suratIsiV133'),ed=document.getElementById('suratIsiEditorV136');
+    if(hidden&&ed)hidden.value=sanitizeSuratHtmlV136(ed.innerHTML);
+  };
+  function suratEditorToolbarV136(){
+    const b=(cmd,label,title,value='null')=>`<button type="button" class="editor-btn-v136" onclick="execSuratEditorV136('${cmd}',${value})" title="${title}">${label}</button>`;
+    return `<div class="surat-editor-toolbar-v136">${b('bold','B','Tebal')}${b('italic','I','Miring')}${b('underline','U','Garis bawah')}${b('insertUnorderedList','• Daftar','Daftar poin')}${b('insertOrderedList','1. Daftar','Daftar nomor')}${b('indent','→ Menjorok','Tambah inden')}${b('outdent','← Kembali','Kurangi inden')}<button type="button" class="editor-btn-v136" onclick="removeSuratFormatV136()">Hapus Format</button><button type="button" class="editor-btn-v136 clear" onclick="clearSuratEditorV136()">Clear Isi</button></div>`;
+  }
+
+  suratFormV133=function(){
+    const s=(suratWorkspaceV133?.surat||[]).find(x=>String(x.id_surat)===String(suratEditIdV133));
+    const today=new Date().toISOString().slice(0,10),initial=sanitizeSuratHtmlV136(s?.isi_ringkas||'<p><br></p>')||'<p><br></p>',k=String(s?.klasifikasi||'UMUM').toUpperCase();
+    return `<section class="panel fade-up premium-panel surat-form-panel-v133 surat-form-v136"><div class="panel-title-row"><div><h3>${s?'Perbaiki Nota Dinas':'Buat Surat'}</h3><p class="panel-sub">Isi Nota Dinas, tandatangani secara elektronik, lalu ajukan kepada Pimpinan.</p></div>${s?`<button class="btn-soft" onclick="cancelEditSuratV133()">Batal Edit</button>`:''}</div><div class="form-grid"><div class="field"><label>Jenis Surat</label><input value="Nota Dinas" readonly></div><div class="field"><label>Nomor Nota Dinas</label><input id="suratNomorV133" value="${esc(s?.nomor_surat||'')}" placeholder="Contoh: 10234/NotaDinas/140726"></div><div class="field"><label>Tanggal Surat</label><input id="suratTanggalV133" type="date" value="${esc(normalizeDateForInputV61(s?.tanggal_surat)||today)}"></div><div class="field"><label>Sifat</label><select id="suratSifatV133"><option ${String(s?.sifat).toUpperCase()==='BIASA'?'selected':''}>BIASA</option><option ${String(s?.sifat).toUpperCase()==='PENTING'?'selected':''}>PENTING</option><option ${String(s?.sifat).toUpperCase()==='SEGERA'?'selected':''}>SEGERA</option></select></div><div class="field"><label>Klasifikasi</label><select id="suratKlasifikasiV133"><option value="UMUM" ${k==='UMUM'?'selected':''}>Umum / Disposisi Bidang</option><option value="PENCAIRAN" ${k==='PENCAIRAN'?'selected':''}>Pencairan</option><option value="UMUM_DAN_PENCAIRAN" ${isCombinedClassV136(k)?'selected':''}>Umum / Disposisi Bidang + Pencairan</option></select></div><div class="field span-2"><label>Perihal</label><input id="suratPerihalV133" value="${esc(s?.perihal||'')}" placeholder="Perihal Nota Dinas"></div><div class="field full"><label>Isi Nota Dinas</label>${suratEditorToolbarV136()}<div id="suratIsiEditorV136" class="surat-editor-v136" contenteditable="true" spellcheck="true" oninput="updateSuratPreviewValueV136()" onkeydown="handleSuratEditorKeydownV136(event)">${initial}</div><input type="hidden" id="suratIsiV133" value="${esc(initial)}"><small class="field-help-v133">Tekan Tab untuk membuat paragraf menjorok. Shift+Tab mengurangi inden pada daftar.</small></div><div class="field full"><label>Lampiran (opsional, maksimal 2 MB)</label><input id="suratFileV133" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"></div></div><div class="surat-form-note-v133">Tanda tangan elektronik pengirim dicatat saat surat diajukan. Surat yang sudah diajukan langsung tampil pada bagian Surat Saya.</div><div class="action-group"><button class="btn-soft" onclick="saveSuratV133(false)">Simpan Draft</button><button class="surat-submit-v136" onclick="saveSuratV133(true)">TTD dan Ajukan ke Pimpinan</button></div></section>`;
+  };
+
+  suratIsIncomingV133=function(s){
+    const role=actualRoleV133(),status=String(s?.status_surat||'DRAFT').toUpperCase(),roles=roleListV136(s?.current_role),idb=String(currentUser?.id_bidang||''),uid=String(currentUser?.id_user||''),own=String(s?.asal_id_user||'')===uid;
+    if(status==='DRAFT'||own)return false;
+    if(role==='ADMIN')return true;
+    if(role==='PIMPINAN')return status==='DIAJUKAN KE PIMPINAN'||roles.includes('PIMPINAN');
+    if(role==='BIDANG')return roles.includes('BIDANG')&&String(s?.current_bidang||'')===idb;
+    return roles.includes(role)||String(s?.current_id_user||'')===uid;
+  };
+
+  suratPipelineV133=function(s){
+    const status=String(s?.status_surat||'DRAFT').toUpperCase(),steps=['Draft','Diajukan','Disetujui','Didisposisi','Tindak Lanjut','Selesai'];
+    let active=1;
+    if(status.includes('DIAJUKAN')||status.includes('PERBAIKAN'))active=2;
+    if(s?.persetujuan_digital||status.includes('DIDISPOSISIKAN')||status.includes('DITINDAKLANJUTI')||status.includes('DITERUSKAN')||status.includes('SELESAI'))active=3;
+    if(status.includes('DIDISPOSISIKAN'))active=4;
+    if(status.includes('TINDAK')||status.includes('DITERUSKAN')||status.includes('MENUNGGU'))active=5;
+    if(status==='SELESAI')active=6;
+    const returned=status.includes('PERBAIKAN')?`<div class="surat-return-banner-v134"><b>Dikembalikan untuk perbaikan</b><span>${esc(s?.disposisi_catatan||'Periksa catatan, perbaiki surat, lalu ajukan ulang.')}</span></div>`:'';
+    return `${returned}<div class="surat-pipeline-v133">${steps.map((x,i)=>`<div class="${i+1<active?'done':i+1===active?'active':''}"><span>${i+1}</span><b>${x}</b></div>`).join('')}</div>`;
+  };
+
+  const suratActionButtonsBaseV136=suratActionButtonsV133;
+  suratActionButtonsV133=function(s){
+    if(!isCombinedClassV136(s?.klasifikasi))return suratActionButtonsBaseV136(s);
+    const role=actualRoleV133(),status=String(s?.status_surat||'').toUpperCase(),own=String(s?.asal_id_user||'')===String(currentUser?.id_user||''),out=[];
+    out.push(`<button class="btn-soft" onclick="printNotaDinasV133('${esc(s.id_surat)}')">Lihat / Cetak Nota Dinas</button>`);
+    if(own&&['DRAFT','PERLU PERBAIKAN'].includes(status))out.push(`<button onclick="editSuratV133('${esc(s.id_surat)}')">${status==='DRAFT'?'Lanjutkan Draft':'Perbaiki & Ajukan Ulang'}</button>`);
+    if((role==='PIMPINAN'||role==='ADMIN')&&status==='DIAJUKAN KE PIMPINAN')out.push(`<button class="btn-green" onclick="openSuratActionV133('${esc(s.id_surat)}','PIMPINAN')">Periksa & Disposisi</button>`);
+    if((role==='VERIFIKATOR_KEUANGAN'||role==='ADMIN')&&String(s?.tindak_lanjut_keuangan||'').toUpperCase()!=='SELESAI'&&!status.includes('DIAJUKAN'))out.push(`<button class="btn-green" onclick="openSuratActionV133('${esc(s.id_surat)}','KEUANGAN')">Verifikasi Pencairan</button>`);
+    if((role==='BENDAHARA'||role==='ADMIN')&&String(s?.tindak_lanjut_keuangan||'').toUpperCase()==='MENUNGGU BENDAHARA')out.push(`<button class="btn-green" onclick="openSuratActionV133('${esc(s.id_surat)}','SELESAI_KEUANGAN')">Selesaikan Pencairan</button>`);
+    if((role==='BIDANG'||role==='ADMIN')&&String(s?.tindak_lanjut_bidang||'').toUpperCase()!=='SELESAI'&&String(s?.current_bidang||'')&&(role==='ADMIN'||String(s.current_bidang)===String(currentUser?.id_bidang||'')))out.push(`<button class="btn-green" onclick="openSuratActionV133('${esc(s.id_surat)}','SELESAI_BIDANG')">Selesaikan Tindak Lanjut Bidang</button>`);
+    return out.join('');
+  };
+
+  function suratCompactCardV136(s,no,mode){
+    const asalBidang=bidangName(s?.asal_bidang)||bidangSuratV136(s?.asal_bidang)?.nama_bidang||s?.asal_bidang||'-';
+    const tujuanBidang=bidangSuratV136(s?.tujuan_bidang)?.nama_bidang||s?.tujuan_bidang||'-';
+    const pending=String(s?.status_surat||'').toUpperCase()==='DIAJUKAN KE PIMPINAN';
+    const tujuan=pending?'Pimpinan':(isCombinedClassV136(s?.klasifikasi)?`${tujuanBidang} + Verifikator Keuangan`:(s?.tujuan_role==='BIDANG'?tujuanBidang:(s?.tujuan_role||'Pimpinan')));
+    const html=sanitizeSuratHtmlV136(s?.isi_ringkas||'<p>-</p>');
+    return `<details class="surat-package-card-v136"><summary><span class="surat-number-v136">${no}</span><div class="surat-summary-title-v136"><b>${esc(s?.perihal||'-')}</b><small>Surat ke-${no} • ${esc(formatDate(s?.tanggal_surat||s?.created_at)||'-')} • ${esc(s?.nomor_surat||'Belum bernomor')}</small>${mode==='MASUK'?`<em>Dari ${esc(s?.asal_nama||'-')} — ${esc(asalBidang)}</em>`:''}</div>${suratStatusChipV133(s?.status_surat)}</summary><div class="surat-package-detail-v136">${suratPipelineV133(s)}<div class="surat-meta-grid-v134"><span><b>Pengirim:</b> ${esc(s?.asal_nama||'-')}</span><span><b>Pimpinan Bidang:</b> ${esc(senderSignatureNameV136(s))}</span><span><b>Bidang:</b> ${esc(asalBidang)}</span><span><b>Klasifikasi:</b> ${esc(klasifikasiLabelV136(s?.klasifikasi))}</span><span><b>Tujuan:</b> ${esc(tujuan)}</span><span><b>Tanggal:</b> ${esc(formatDate(s?.tanggal_surat||s?.created_at)||'-')}</span></div><div class="surat-summary-v133"><div class="surat-rich-view-v134">${html}</div>${s?.disposisi_catatan?`<div><b>Catatan Disposisi:</b> ${esc(s.disposisi_catatan)}</div>`:''}${s?.url_file?`<div><a href="${esc(s.url_file)}" target="_blank" rel="noopener">Lampiran: ${esc(s.nama_file||'Lampiran')}</a></div>`:''}</div><details class="surat-history-v133"><summary>Riwayat Surat</summary><pre>${esc(s?.riwayat_surat||'Belum ada riwayat')}</pre></details><div class="action-group surat-actions-v133">${suratActionButtonsV133(s)}</div></div></details>`;
+  }
+
+  renderSuratV133=function(){
+    const area=document.getElementById('contentArea');if(!area)return;
+    if(!suratWorkspaceV133.loaded){area.innerHTML=`<section class="panel premium-panel surat-loading-v133"><h3>Surat</h3><div class="skeleton-v133"></div><div class="skeleton-v133 short"></div></section>`;return;}
+    const role=actualRoleV133(),canCreate=['BIDANG','ADMIN','VERIFIKATOR_PBJ','VERIFIKATOR_KEUANGAN','BENDAHARA','PIMPINAN'].includes(role),all=suratWorkspaceV133.surat||[];
+    const incoming=sortSuratOldestV136(all.filter(suratIsIncomingV133)),own=sortSuratOldestV136(all.filter(s=>String(s.asal_id_user||'')===String(currentUser?.id_user||'')));
+    const ownCards=own.map((s,i)=>suratCompactCardV136(s,i+1,'SENDIRI')).join('');
+    const incomingCards=incoming.map((s,i)=>suratCompactCardV136(s,i+1,'MASUK')).join('');
+    const body=suratTabV133==='BUAT'?`${suratFormV133()}<section class="panel premium-panel surat-own-panel-v136" id="suratSayaPanelV134"><div class="panel-title-row"><div><h3>Surat Saya</h3><p class="panel-sub">Diurutkan dari surat paling lama. Klik kartu untuk melihat isi, pipeline, dan tindakan.</p></div><span class="surat-count-v136">${own.length} surat</span></div><div class="surat-package-list-v136">${ownCards||'<p class="empty">Belum ada surat yang dibuat.</p>'}</div></section>`:`<section class="panel fade-up premium-panel surat-inbox-v136"><div class="panel-title-row"><div><h3>Surat Masuk</h3><p class="panel-sub">Diurutkan dari surat paling lama agar tindak lanjut tidak terlewat.</p></div><button class="btn-refresh" onclick="loadSuratWorkspaceV133(true)">Refresh</button></div><div class="surat-package-list-v136">${incomingCards||'<p class="empty">Tidak ada surat masuk yang perlu ditindaklanjuti.</p>'}</div></section>`;
+    area.innerHTML=`<div class="surat-page-v136"><section class="panel premium-panel surat-head-v133"><div class="panel-title-row"><div><h3>Surat</h3><p class="panel-sub">Pembuatan, tanda tangan elektronik, persetujuan, disposisi, dan tindak lanjut Nota Dinas.</p></div></div><div class="surat-tabs-v133">${canCreate?`<button class="${suratTabV133==='BUAT'?'active':''}" onclick="setSuratTabV133('BUAT')">Buat Surat</button>`:''}<button class="${suratTabV133==='MASUK'?'active':''}" onclick="setSuratTabV133('MASUK')">Surat Masuk <span>${incoming.filter(x=>String(x.status_surat).toUpperCase()!=='SELESAI').length}</span></button></div></section>${body}<div id="suratActionModalV133" class="modal-backdrop hidden"></div></div>`;
+    setTimeout(updateSuratPreviewValueV136,0);
+  };
+
+  openSuratActionV133=function(id,mode){
+    const s=(suratWorkspaceV133.surat||[]).find(x=>String(x.id_surat)===String(id)),m=document.getElementById('suratActionModalV133');if(!s||!m)return;
+    const options=(suratWorkspaceV133.bidangs||[]).map(b=>`<option value="${esc(b.id_bidang)}">${esc(b.nama_bidang)}</option>`).join('');let content='';
+    if(mode==='PIMPINAN'){
+      const combined=isCombinedClassV136(s.klasifikasi),pencairan=String(s.klasifikasi).toUpperCase()==='PENCAIRAN';
+      content=`<div class="field"><label>Tujuan Disposisi</label>${pencairan?'<input value="Verifikator Keuangan → Bendahara" readonly>':`<select id="suratTujuanBidangV133"><option value="">Pilih bidang tujuan</option>${options}</select>`}</div>${combined?'<div class="surat-route-note-v136">Surat juga akan diteruskan ke Verifikator Keuangan untuk jalur pencairan.</div>':''}<div class="field full"><label>Catatan Disposisi</label><textarea id="suratActionCatatanV133" rows="4" placeholder="Arahan Pimpinan"></textarea></div><div class="approval-statement-v133">Dengan memilih <b>Setujui & Disposisikan</b>, Pimpinan menyatakan surat telah diperiksa dan disetujui secara elektronik melalui SIMPROV.</div><div class="modal-actions"><button class="btn-danger" onclick="submitSuratActionV133('${esc(id)}','KEMBALIKAN')">Kembalikan untuk Perbaikan</button><button class="btn-green" onclick="submitSuratActionV133('${esc(id)}','SETUJUI_DAN_DISPOSISI')">Setujui & Disposisikan</button></div>`;
+    }else if(mode==='KEUANGAN')content=`<div class="field full"><label>Catatan Verifikasi Keuangan</label><textarea id="suratActionCatatanV133" rows="4" placeholder="Catatan pemeriksaan atau arahan kepada Bendahara"></textarea></div><div class="modal-actions"><button class="btn-danger" onclick="submitSuratActionV133('${esc(id)}','KEMBALIKAN')">Kembalikan untuk Perbaikan</button><button class="btn-green" onclick="submitSuratActionV133('${esc(id)}','TERUSKAN_KE_BENDAHARA')">Teruskan ke Bendahara</button></div>`;
+    else {const decision=mode==='SELESAI_BIDANG'?'SELESAIKAN_BIDANG':mode==='SELESAI_KEUANGAN'?'SELESAIKAN_KEUANGAN':'SELESAIKAN',title=mode==='SELESAI_BIDANG'?'Catatan Tindak Lanjut Bidang':mode==='SELESAI_KEUANGAN'?'Catatan Penyelesaian Pencairan':'Catatan Penyelesaian';content=`<div class="field full"><label>${title}</label><textarea id="suratActionCatatanV133" rows="4" placeholder="Ringkasan tindak lanjut"></textarea></div><div class="modal-actions"><button class="btn-soft" onclick="closeSuratActionV133()">Batal</button><button class="btn-green" onclick="submitSuratActionV133('${esc(id)}','${decision}')">Tandai Selesai</button></div>`;}
+    m.className='modal-backdrop';m.innerHTML=`<div class="modal-card surat-action-card-v133 fade-up"><div class="modal-head"><div><h3>Tindak Lanjut Nota Dinas</h3><p>${esc(s.nomor_surat||'Belum bernomor')} • ${esc(s.perihal||'-')}</p></div><button class="btn-soft" onclick="closeSuratActionV133()">Tutup</button></div><div class="surat-action-meta-v134"><div><b>Pengirim</b><span>${esc(s.asal_nama||'-')}</span></div><div><b>Bidang</b><span>${esc(bidangName(s.asal_bidang)||bidangSuratV136(s.asal_bidang).nama_bidang||'-')}</span></div><div><b>Klasifikasi</b><span>${esc(klasifikasiLabelV136(s.klasifikasi))}</span></div><div><b>Status Saat Ini</b><span>${esc(s.status_surat||'-')}</span></div></div>${content}</div>`;
+  };
+
+  submitSuratActionV133=async function(id,keputusan){
+    const catatan=document.getElementById('suratActionCatatanV133')?.value.trim()||'',tujuan_bidang=document.getElementById('suratTujuanBidangV133')?.value||'';
+    const labels={SETUJUI_DAN_DISPOSISI:'menyetujui dan mendisposisikan Nota Dinas',TERUSKAN_KE_BENDAHARA:'meneruskan Nota Dinas kepada Bendahara',KEMBALIKAN:'mengembalikan Nota Dinas untuk perbaikan',SELESAIKAN:'menyelesaikan tindak lanjut Nota Dinas',SELESAIKAN_BIDANG:'menyelesaikan tindak lanjut bidang',SELESAIKAN_KEUANGAN:'menyelesaikan tindak lanjut pencairan'};
+    if(keputusan==='KEMBALIKAN'&&!catatan){alert('Catatan perbaikan wajib diisi.');return;}
+    const ok=await confirmActionV133({title:'Konfirmasi Proses Surat',message:`Anda akan ${labels[keputusan]||'memproses Nota Dinas'}. Nama petugas dan waktu proses akan dicatat dalam riwayat surat.`,confirmText:'Ya, Proses',danger:keputusan==='KEMBALIKAN'});if(!ok)return;
+    showLoading('Memperbarui status surat...');
+    try{const r=await apiPost({action:'actionSuratV133',user:currentUser,id_surat:id,keputusan,catatan,tujuan_bidang});if(!r.success)throw new Error(r.message||'Gagal memproses surat');closeSuratActionV133();sessionStorage.removeItem(suratCacheKeyV133());await loadSuratWorkspaceV133(true);renderSuratV133();alert(r.message);}catch(e){alert(e.message||String(e));}finally{hideLoading();}
+  };
+
+  printNotaDinasV133=function(id){
+    const s=(suratWorkspaceV133.surat||[]).find(x=>String(x.id_surat)===String(id));if(!s)return;
+    const w=window.open('','_blank');if(!w)return alert('Popup diblokir browser. Izinkan popup untuk melihat/cetak Nota Dinas.');
+    const body=sanitizeSuratHtmlV136(s.isi_ringkas||'<p>-</p>'),senderName=senderSignatureNameV136(s),senderSigned=!!s.pengirim_ttd_digital||String(s.status_surat||'').toUpperCase()!=='DRAFT';
+    const approval=`<div class="sign-box"><div class="sign-title">Mengetahui / Menyetujui</div>${s.persetujuan_digital?`<div class="ttd-mark">TTE SIMPROV</div><div class="sign-name"><b>${esc(s.disetujui_oleh||'Pimpinan')}</b></div><div class="sign-role">Pimpinan</div><small>${esc(s.persetujuan_digital)}</small>`:`<div class="sign-space"></div><div class="sign-name"><b>Belum disetujui</b></div><div class="sign-role">Pimpinan</div>`}</div>`;
+    const sender=`<div class="sign-box"><div class="sign-title">Pengirim</div>${senderSigned?`<div class="ttd-mark">TTE SIMPROV</div><div class="sign-name"><b>${esc(senderName)}</b></div><div class="sign-role">Pimpinan Bidang</div><small>${esc(s.pengirim_ttd_digital||'Ditandatangani secara elektronik melalui SIMPROV')}</small>`:`<div class="sign-space"></div><div class="sign-name"><b>${esc(senderName)}</b></div><div class="sign-role">Pimpinan Bidang</div>`}</div>`;
+    const lampiran=s.url_file?`<div class="page-break"></div><section class="lampiran"><h3>LAMPIRAN NOTA DINAS</h3><p><b>Nama file:</b> ${esc(s.nama_file||'Lampiran')}</p><p><b>Tautan:</b> <a href="${esc(s.url_file)}" target="_blank" rel="noopener">Buka lampiran</a></p><iframe src="${esc(s.url_file)}" title="Lampiran"></iframe></section>`:'';
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Nota Dinas ${esc(s.nomor_surat||'')}</title><style>@page{size:A4;margin:17mm}*{box-sizing:border-box}body{font-family:Georgia,'Times New Roman',serif;color:#111;font-size:12pt;line-height:1.5;margin:0}.toolbar{position:sticky;top:0;z-index:5;padding:10px;background:#eef8ff;display:flex;justify-content:flex-end;gap:8px}.toolbar button{border:1px solid #bcd8ea;border-radius:9px;padding:9px 14px;background:#f7fcff;color:#14517d;font-weight:700}.sheet{padding:10px 2px}.title{text-align:center;margin-bottom:18px}.title h2{margin:0 0 5px}.meta{width:100%;border-collapse:collapse;margin-bottom:18px}.meta td{padding:2px 4px;vertical-align:top}.meta td:first-child{width:105px}.meta td:nth-child(2){width:12px}.isi{text-align:justify;line-height:1.55}.isi p{margin:0 0 9px}.isi ul,.isi ol{margin:0 0 9px 25px}.ttd-row{display:grid;grid-template-columns:1fr 1fr;gap:44px;margin-top:34px}.sign-box{text-align:center}.sign-title{font-weight:700;margin-bottom:10px}.ttd-mark{display:inline-block;border:1px dashed #2673aa;color:#2673aa;border-radius:9px;padding:6px 10px;font-size:9.5pt;font-weight:700}.sign-space{height:66px}.sign-name{margin-top:10px}.sign-role{font-size:10pt}.sign-box small{display:block;color:#29648e;font-size:8.5pt;margin-top:5px}.footer{margin-top:28px;color:#607080;font-size:9pt}.page-break{page-break-before:always}.lampiran h3{text-align:center}.lampiran iframe{width:100%;height:760px;border:1px solid #ccd8e2;margin-top:12px}@media print{.toolbar{display:none}.sheet{padding:0}.lampiran iframe{display:none}}</style></head><body><div class="toolbar"><button onclick="window.close()">Tutup</button><button onclick="window.print()">Cetak / Simpan PDF</button></div><main class="sheet"><div class="title"><h2>NOTA DINAS</h2><div>Nomor: ${esc(s.nomor_surat||'-')}</div></div><table class="meta"><tr><td>Kepada</td><td>:</td><td>Pimpinan</td></tr><tr><td>Dari</td><td>:</td><td>${esc(senderName)} (${esc(bidangName(s.asal_bidang)||bidangSuratV136(s.asal_bidang).nama_bidang||'-')})</td></tr><tr><td>Tanggal</td><td>:</td><td>${esc(formatDate(s.tanggal_surat)||'-')}</td></tr><tr><td>Sifat</td><td>:</td><td>${esc(s.sifat||'BIASA')}</td></tr><tr><td>Klasifikasi</td><td>:</td><td>${esc(klasifikasiLabelV136(s.klasifikasi))}</td></tr><tr><td>Perihal</td><td>:</td><td>${esc(s.perihal||'-')}</td></tr></table><div class="isi">${body}</div><div class="ttd-row">${approval}${sender}</div><div class="footer">Dokumen dibuat, ditandatangani, dan dicatat melalui SIMPROV • ID Surat: ${esc(s.id_surat||'-')}</div>${lampiran}</main></body></html>`);w.document.close();
+  };
+
+  const renderManageBaseV136=renderManajemenAkunV65;
+  renderManajemenAkunV65=function(){
+    renderManageBaseV136();
+    if(!isSuperAdminV65())return;
+    const area=document.getElementById('contentArea');if(!area)return;
+    const cards=(dashboard?.bidangs||[]).map(b=>`<label class="pimpinan-bidang-card-v136"><span><b>${esc(b.nama_bidang||'-')}</b><small>${esc(b.id_bidang||'')}</small></span><input class="pimpinan-bidang-input-v136" data-id="${esc(b.id_bidang)}" value="${esc(b.nama_pimpinan_bidang||'')}" placeholder="Nama pimpinan bidang"></label>`).join('');
+    const panel=`<section class="panel fade-up premium-panel pimpinan-bidang-panel-v136"><div class="panel-title-row"><div><h3>Nama Pimpinan Setiap Bidang</h3><p class="panel-sub">Nama ini digunakan pada tanda tangan elektronik Nota Dinas dan dokumen yang dibuat oleh masing-masing bidang.</p></div><button class="btn-refresh" onclick="savePimpinanBidangV136()">Simpan Nama Pimpinan</button></div><div class="pimpinan-bidang-grid-v136">${cards||'<p class="empty">Belum ada data bidang.</p>'}</div></section>`;
+    area.insertAdjacentHTML('afterbegin',panel);
+  };
+  window.savePimpinanBidangV136=async function(){
+    const inputs=[...document.querySelectorAll('.pimpinan-bidang-input-v136')],empty=inputs.filter(x=>!x.value.trim());
+    if(empty.length){alert(`Nama pimpinan belum diisi untuk ${empty.length} bidang. Lengkapi seluruh nama agar tanda tangan surat tidak kosong.`);empty[0].focus();return;}
+    const items=inputs.map(x=>({id_bidang:x.dataset.id,nama_pimpinan:x.value.trim()}));
+    const ok=await confirmActionV133({title:'Simpan Nama Pimpinan Bidang',message:`Nama pimpinan untuk ${items.length} bidang akan digunakan pada tanda tangan elektronik surat.`,confirmText:'Ya, Simpan'});if(!ok)return;
+    showLoading('Menyimpan nama pimpinan bidang...');
+    try{const r=await apiPost({action:'savePimpinanBidangV136',user:currentUser,data:{items}});if(!r.success)throw new Error(r.message||'Gagal menyimpan nama pimpinan bidang');await loadDashboard(false);renderAll();sessionStorage.removeItem(suratCacheKeyV133());alert(r.message);}catch(e){alert(e.message||String(e));}finally{hideLoading();}
+  };
+})();
+
+/* TTD dan pengajuan surat memakai editor v136 secara langsung. */
+saveSuratV133=async function(submit){
+  const file=document.getElementById('suratFileV133')?.files?.[0],nomor=document.getElementById('suratNomorV133')?.value.trim()||'',perihal=document.getElementById('suratPerihalV133')?.value.trim()||'',tanggal=document.getElementById('suratTanggalV133')?.value||'';
+  if(typeof updateSuratPreviewValueV136==='function')updateSuratPreviewValueV136();
+  const isi=document.getElementById('suratIsiV133')?.value||'',tmp=document.createElement('div');tmp.innerHTML=isi;const isiText=(tmp.textContent||'').replace(/\s+/g,' ').trim();
+  if(!perihal||!tanggal||!isiText){alert('Perihal, tanggal, dan isi Nota Dinas wajib diisi.');return;}
+  if(submit&&!nomor){alert('Nomor Nota Dinas wajib diisi sebelum ditandatangani dan diajukan.');return;}
+  if(file&&file.size>MAX_UPLOAD_BYTES_V133){alert('Ukuran lampiran maksimal 2 MB.');return;}
+  const ok=await confirmActionV133({title:submit?'TTD dan Ajukan Nota Dinas':'Simpan Draft Nota Dinas',message:submit?'Dengan melanjutkan, Nota Dinas ditandatangani secara elektronik atas nama pimpinan bidang dan diajukan kepada Pimpinan. Pastikan isi surat sudah benar.':'Draft akan disimpan dan masih dapat diedit kembali.',confirmText:submit?'Ya, TTD & Ajukan':'Ya, Simpan'});if(!ok)return;
+  const data={id_surat:suratEditIdV133,nomor_surat:nomor,tanggal_surat:tanggal,sifat:document.getElementById('suratSifatV133')?.value||'BIASA',klasifikasi:document.getElementById('suratKlasifikasiV133')?.value||'UMUM',perihal,isi_ringkas:isi,submit};
+  showLoading(submit?'Menandatangani dan mengajukan Nota Dinas...':'Menyimpan draft Nota Dinas...');
+  try{if(file){data.file_name=file.name;data.mime_type=file.type;data.file_base64=await fileToBase64(file);}const r=await apiPost({action:'saveSuratV133',user:currentUser,data});if(!r.success)throw new Error(r.message||'Gagal menyimpan surat');suratEditIdV133='';sessionStorage.removeItem(suratCacheKeyV133());await loadSuratWorkspaceV133(true);suratTabV133='BUAT';renderSuratV133();setTimeout(()=>document.getElementById('suratSayaPanelV134')?.scrollIntoView({behavior:'smooth',block:'start'}),80);alert(r.message||'Nota Dinas berhasil diproses');}catch(e){alert(e.message||String(e));}finally{hideLoading();}
+};
