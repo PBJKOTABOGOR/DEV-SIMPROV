@@ -2976,3 +2976,36 @@ body.modal-open-v122{overflow:hidden}
   .surat-summary-title-v136>b{white-space:normal}.surat-editor-toolbar-v136{position:static}.surat-editor-v136{min-height:230px;padding:16px}
   .pimpinan-bidang-card-v136{grid-template-columns:1fr}.surat-page-v136 .surat-tabs-v133 button{width:auto;min-width:130px}
 }
+
+
+/* =========================================================
+   SIMPROV v137 - HPS foreground, management minimize, surat.
+   ========================================================= */
+#hpsOptionalModalV121.hps-modal-backdrop-v122{
+  z-index:1500000!important;
+}
+#hpsOptionalModalV121 .hps-modal-card-v122{
+  isolation:isolate;
+}
+.management-collapsible-v137.is-collapsed-v137 > :not(.management-header-v137){
+  display:none!important;
+}
+.management-header-v137{
+  margin-bottom:0!important;
+  align-items:center!important;
+}
+.management-collapsible-v137:not(.is-collapsed-v137) .management-header-v137{
+  margin-bottom:14px!important;
+}
+.management-toggle-v137{
+  margin-left:auto;
+  flex:0 0 auto;
+}
+.surat-attachment-btn-v137{
+  margin-top:8px!important;
+  width:auto!important;
+}
+@media(max-width:720px){
+  .management-header-v137{align-items:flex-start!important;flex-wrap:wrap}
+  .management-toggle-v137{margin-left:0}
+}
