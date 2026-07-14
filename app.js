@@ -3865,7 +3865,7 @@ function roleLabel(){
 }
 function renderMenu(){
   let menus;
-  if(isSuperAdminV65()) menus=['Dashboard Monitoring','Struktur Anggaran','Perencanaan','Pencairan','Manajemen Akun'];
+  if(isSuperAdminV65()) menus=['Dashboard Monitoring','Struktur Anggaran','Perencanaan','Pencairan','Manajemen Akses'];
   else if(isPBJVerifierV65()) menus=['Dashboard Monitoring','Struktur Anggaran','Perencanaan','Pencairan'];
   else if(isKeuangan()) menus=['Dashboard Monitoring','Pencairan'];
   else menus=isReviewer()?MENUS_REVIEWER:MENUS_USER;
@@ -3874,7 +3874,7 @@ function renderMenu(){
 }
 const renderContentBeforeV65 = renderContent;
 renderContent = function(){
-  if(activeMenu==='Manajemen Akun') return renderManajemenAkunV65();
+  if(activeMenu==='Manajemen Akses') return renderManajemenAkunV65();
   return renderContentBeforeV65();
 };
 function verifierUsersV65(){ return dashboard?.verifierUsers || []; }
@@ -3897,7 +3897,7 @@ function renderManajemenAkunV65(){
     </div>`;
   }).join('');
   document.getElementById('contentArea').innerHTML=`<section class="panel fade-up premium-panel">
-    <div class="panel-title-row"><div><h3>Manajemen Akun Verifikator</h3><p class="panel-sub">Admin membuat akun Verifikator/Keuangan dan menentukan bidang yang boleh ditangani.</p></div><button class="btn-refresh" onclick="openCreateVerifierV65()">+ Buat Akun</button></div>
+    <div class="panel-title-row"><div><h3>Manajemen Akses dan Akun Verifikator</h3><p class="panel-sub">Admin membuat akun Verifikator/Keuangan dan menentukan bidang yang boleh ditangani.</p></div><button class="btn-refresh" onclick="openCreateVerifierV65()">+ Buat Akun</button></div>
     <div class="admin-budget-list">${rows||'<p class="muted">Belum ada akun verifikator tambahan.</p>'}</div>
   </section><div id="verifierModalV65" class="modal hidden"></div>`;
 }
@@ -4344,7 +4344,7 @@ function roleLabel(){
 }
 function renderMenu(){
   let menus;
-  if(isSuperAdminV65()) menus=['Dashboard Monitoring','Struktur Anggaran','Perencanaan','Pencairan','Manajemen Akun'];
+  if(isSuperAdminV65()) menus=['Dashboard Monitoring','Struktur Anggaran','Perencanaan','Pencairan','Manajemen Akses'];
   else if(isVerifierV77()) menus=['Dashboard Monitoring','Struktur Anggaran','Perencanaan','Pencairan','Laporan'];
   else menus=isReviewer()?MENUS_REVIEWER:MENUS_USER;
   if(!menus.includes(activeMenu)) activeMenu=menus[0];
@@ -4375,7 +4375,7 @@ function renderManajemenAkunV65(){
   const i=identityV77();
   document.getElementById('contentArea').innerHTML=`
   <section class="panel fade-up premium-panel"><div class="panel-title-row"><div><h3>Identitas Penanggung Jawab</h3><p class="panel-sub">Nama ini tampil pada header dan digunakan sebagai identitas resmi aplikasi.</p></div></div><div class="form-grid"><div class="field"><label>Nama Ketua Umum</label><input id="ketuaUmumV77" value="${esc(i.ketua_umum||'')}" placeholder="Nama lengkap Ketua Umum"></div><div class="field"><label>Nama Verifikator</label><input id="verifikatorUtamaV77" value="${esc(i.verifikator||users[0]?.nama||'')}" placeholder="Nama lengkap Verifikator"></div></div><button onclick="saveIdentityV77()">Simpan Identitas</button><div id="identityMsgV77" class="msg"></div></section>
-  <section class="panel fade-up premium-panel"><div class="panel-title-row"><div><h3>Manajemen Akun Verifikator</h3><p class="panel-sub">Satu jenis Verifikator menangani perencanaan, dokumen, dan finalisasi sesuai bidang penugasannya.</p></div><button class="btn-refresh" onclick="openCreateVerifierV65()">+ Buat Akun</button></div><div class="admin-budget-list">${rows||'<p class="muted">Belum ada akun verifikator.</p>'}</div></section><div id="verifierModalV65" class="modal hidden"></div>`;
+  <section class="panel fade-up premium-panel"><div class="panel-title-row"><div><h3>Manajemen Akses dan Akun Verifikator</h3><p class="panel-sub">Satu jenis Verifikator menangani perencanaan, dokumen, dan finalisasi sesuai bidang penugasannya.</p></div><button class="btn-refresh" onclick="openCreateVerifierV65()">+ Buat Akun</button></div><div class="admin-budget-list">${rows||'<p class="muted">Belum ada akun verifikator.</p>'}</div></section><div id="verifierModalV65" class="modal hidden"></div>`;
 }
 function verifierFormModalV65(u){
   const editing=!!u; const selected=String(u?.bidang_akses||'').split(',').map(x=>x.trim()).filter(Boolean); const modal=document.getElementById('verifierModalV65');
@@ -4501,7 +4501,7 @@ function isNonPengadaanV79(k){
 }
 renderMenu=function(){
   let menus;
-  if(isSuperAdminV65()) menus=['Dashboard Monitoring','Struktur Anggaran','Perencanaan','Pencairan','Non Pengadaan','Manajemen Akun'];
+  if(isSuperAdminV65()) menus=['Dashboard Monitoring','Struktur Anggaran','Perencanaan','Pencairan','Non Pengadaan','Manajemen Akses'];
   else if(isVerifierV77()) menus=['Dashboard Monitoring','Struktur Anggaran','Perencanaan','Pencairan','Non Pengadaan','Laporan'];
   else menus=isReviewer()?['Dashboard Monitoring','Struktur Anggaran','Perencanaan','Pencairan','Non Pengadaan','Laporan']:['Struktur Anggaran','Perencanaan','Pencairan','Non Pengadaan','Laporan'];
   if(!menus.includes(activeMenu)) activeMenu=menus[0];
@@ -4890,7 +4890,7 @@ function isProcurementV83(k){ return !isNonKategoriV81(k); }
 function canUploadNonV83(){ return !canManage() && !isReviewer(); }
 function menuItemsV83(){
   if(isSuperAdminV65()) return [
-    ['Dashboard Monitoring','Dashboard Monitoring'],['Struktur Anggaran','Struktur Anggaran'],['Perencanaan','Perencanaan'],['Pencairan','Pencatatan Pengadaan'],['Non Pengadaan','Pencatatan Non Pengadaan'],['Manajemen Akun','Manajemen Akun']
+    ['Dashboard Monitoring','Dashboard Monitoring'],['Struktur Anggaran','Struktur Anggaran'],['Perencanaan','Perencanaan'],['Pencairan','Pencatatan Pengadaan'],['Non Pengadaan','Pencatatan Non Pengadaan'],['Manajemen Akses','Manajemen Akses']
   ];
   if(isVerifierV77()) return [
     ['Dashboard Monitoring','Dashboard Monitoring'],['Struktur Anggaran','Struktur Anggaran'],['Perencanaan','Perencanaan'],['Pencairan','Pencatatan Pengadaan'],['Non Pengadaan','Pencatatan Non Pengadaan'],['Laporan','Laporan']
@@ -5004,7 +5004,7 @@ renderContent=function(){
   if(activeMenu==='Perencanaan') return renderPerencanaan();
   if(activeMenu==='Pencairan') return renderPencairan();
   if(activeMenu==='Non Pengadaan') return renderNonPengadaanV79();
-  if(activeMenu==='Manajemen Akun') return renderManajemenAkunV65();
+  if(activeMenu==='Manajemen Akses') return renderManajemenAkunV65();
   if(activeMenu==='Laporan') return renderLaporan();
   return renderStrukturAnggaran();
 };
@@ -5074,7 +5074,7 @@ renderContent=function(){
   if(activeMenu==='Perencanaan') return renderPerencanaan();
   if(activeMenu==='Pencairan') return renderPencairan();
   if(activeMenu==='Non Pengadaan') return renderNonPengadaanV79();
-  if(activeMenu==='Manajemen Akun') return renderManajemenAkunV65();
+  if(activeMenu==='Manajemen Akses') return renderManajemenAkunV65();
   if(activeMenu==='Laporan') return typeof renderLaporan==='function' ? renderLaporan() : renderLaporanUser();
   return renderStruktur();
 };
@@ -6860,10 +6860,15 @@ function ppkStructurePanelV102(){
     <div class="panel-title-row"><div><h3>Pejabat Penanda Tangan Komitmen</h3><p class="panel-sub">Nama pejabat diisi oleh Admin. Sistem otomatis menerapkan pejabat sesuai kelompok bidang.</p></div></div>
     <div class="ppk-grid-v102">
       <div class="field"><label>Ketua Harian</label><input id="ppkKetuaHarian" value="${esc(i.ketua_harian||'')}" placeholder="Nama Ketua Harian"><small>Membidangi Kesekretariatan.</small></div>
+      <div class="field"><label>Wakil Ketua Harian — Verifikator Pencairan</label><input id="ppkWakilKetuaHarian" value="${esc(i.wakil_ketua_harian||'')}" placeholder="Nama Wakil Ketua Harian"><small>Menandatangani verifikasi pencairan bidang Kesekretariatan.</small></div>
       <div class="field"><label>Ketua I</label><input id="ppkKetuaI" value="${esc(i.ketua_i||'')}" placeholder="Nama Ketua I"><small>Membidangi Penyiaran dan Pelayanan Media; Akomodasi, Konsumsi dan Pengarahan Massa; Kesehatan.</small></div>
+      <div class="field"><label>Wakil Ketua I — Verifikator Pencairan</label><input id="ppkWakilKetuaI" value="${esc(i.wakil_ketua_i||'')}" placeholder="Nama Wakil Ketua I"><small>Menandatangani verifikasi pencairan bidang Ketua I.</small></div>
       <div class="field"><label>Ketua II</label><input id="ppkKetuaII" value="${esc(i.ketua_ii||'')}" placeholder="Nama Ketua II"><small>Membidangi Organisasi dan Hukum; Keamanan; Transportasi.</small></div>
+      <div class="field"><label>Wakil Ketua II — Verifikator Pencairan</label><input id="ppkWakilKetuaII" value="${esc(i.wakil_ketua_ii||'')}" placeholder="Nama Wakil Ketua II"><small>Menandatangani verifikasi pencairan bidang Ketua II.</small></div>
       <div class="field"><label>Ketua III</label><input id="ppkKetuaIII" value="${esc(i.ketua_iii||'')}" placeholder="Nama Ketua III"><small>Membidangi Pertandingan dan Perwasitan; Sarana dan Prasarana Pertandingan; Teknologi Informasi dan Komunikasi.</small></div>
+      <div class="field"><label>Wakil Ketua III — Verifikator Pencairan</label><input id="ppkWakilKetuaIII" value="${esc(i.wakil_ketua_iii||'')}" placeholder="Nama Wakil Ketua III"><small>Menandatangani verifikasi pencairan bidang Ketua III.</small></div>
       <div class="field"><label>Sekretaris Umum</label><input id="ppkSekum" value="${esc(i.sekretaris_umum||'')}" placeholder="Nama Sekretaris Umum"><small>Membidangi Kerjasama dan Usaha; Pengadaan Barang dan Jasa.</small></div>
+      <div class="field"><label>Wakil Sekretaris — Verifikator Pencairan</label><input id="ppkWakilSekretaris" value="${esc(i.wakil_sekretaris||'')}" placeholder="Nama Wakil Sekretaris"><small>Menandatangani verifikasi pencairan bidang Sekretaris Umum.</small></div>
     </div>
     <div class="actions"><button id="btnSavePpkStructureV102" type="button" onclick="savePpkStructureV102()">Simpan Struktur Pejabat</button></div>
   </section>`;
@@ -6879,7 +6884,12 @@ async function savePpkStructureV102(){
       ketua_i:document.getElementById('ppkKetuaI')?.value||'',
       ketua_ii:document.getElementById('ppkKetuaII')?.value||'',
       ketua_iii:document.getElementById('ppkKetuaIII')?.value||'',
-      sekretaris_umum:document.getElementById('ppkSekum')?.value||''
+      sekretaris_umum:document.getElementById('ppkSekum')?.value||'',
+      wakil_ketua_harian:document.getElementById('ppkWakilKetuaHarian')?.value||'',
+      wakil_ketua_i:document.getElementById('ppkWakilKetuaI')?.value||'',
+      wakil_ketua_ii:document.getElementById('ppkWakilKetuaII')?.value||'',
+      wakil_ketua_iii:document.getElementById('ppkWakilKetuaIII')?.value||'',
+      wakil_sekretaris:document.getElementById('ppkWakilSekretaris')?.value||''
     }});
     if(!res.success) throw new Error(res.message||'Gagal menyimpan');
     await loadDashboard(false);
@@ -6892,13 +6902,7 @@ async function savePpkStructureV102(){
   }
 }
 const renderStrukturV102Base_ = renderStruktur;
-renderStruktur = function(){
-  renderStrukturV102Base_();
-  if(canManage()){
-    const area=document.getElementById('contentArea');
-    if(area && !area.querySelector('.ppk-structure-v102')) area.insertAdjacentHTML('afterbegin',ppkStructurePanelV102());
-  }
-};
+renderStruktur = function(){ renderStrukturV102Base_(); };
 
 function syncNonPengadaanUiV102(){
   const non=document.getElementById('kategoriPerencanaanV79')?.value==='NON PENGADAAN';
@@ -6925,7 +6929,7 @@ renderManajemenAkunV65 = function(){
     const names=ids.map(id=>bidangName(id)).join(', ') || '-';
     return `<div class="admin-budget-card account-card-v65"><div class="admin-budget-info"><b>${esc(u.nama||'-')}</b><small>${esc(u.id_user||'')} • ${esc(u.username||'')}</small></div><div><span class="badge badge-blue">VERIFIKATOR</span></div><div class="account-scope-text"><small>Bidang Penugasan</small><br>${esc(names)}</div><div>${badge(u.status||'AKTIF')}</div><div><button class="btn-mini" onclick="openEditVerifierV65('${esc(u.id_user)}')">Edit</button></div></div>`;
   }).join('');
-  document.getElementById('contentArea').innerHTML=`<section class="panel fade-up premium-panel"><div class="panel-title-row"><div><h3>Manajemen Akun Verifikator</h3><p class="panel-sub">Verifikator menangani perencanaan, dokumen, dan finalisasi sesuai bidang penugasannya.</p></div><button class="btn-refresh" onclick="openCreateVerifierV65()">+ Buat Akun</button></div><div class="admin-budget-list">${rows||'<p class="muted">Belum ada akun verifikator.</p>'}</div></section><div id="verifierModalV65" class="modal hidden"></div>`;
+  document.getElementById('contentArea').innerHTML=`${ppkStructurePanelV102()}<section class="panel fade-up premium-panel"><div class="panel-title-row"><div><h3>Manajemen Akses dan Akun Verifikator</h3><p class="panel-sub">Verifikator menangani perencanaan, dokumen, dan finalisasi sesuai bidang penugasannya.</p></div><button class="btn-refresh" onclick="openCreateVerifierV65()">+ Buat Akun</button></div><div class="admin-budget-list">${rows||'<p class="muted">Belum ada akun verifikator.</p>'}</div></section><div id="verifierModalV65" class="modal hidden"></div>`;
 };
 
 function honorPlannedRateV103(){
@@ -8620,7 +8624,7 @@ const TEMPLATE_ACUAN_PL_V123 = {
 const __menuItemsV123Base = menuItemsV83;
 menuItemsV83 = function(){
   const items=__menuItemsV123Base().map(x=>x.slice());
-  const order=['Dashboard Monitoring','Struktur Anggaran','Perencanaan','Pengadaan Langsung','Pencairan','Non Pengadaan','Manajemen Akun','Laporan'];
+  const order=['Dashboard Monitoring','Struktur Anggaran','Perencanaan','Pengadaan Langsung','Pencairan','Non Pengadaan','Manajemen Akses','Laporan'];
   return items.sort((a,b)=>order.indexOf(a[0])-order.indexOf(b[0]));
 };
 
@@ -8958,7 +8962,6 @@ function enhancePlanningTableV126(){
   const panels=[...document.querySelectorAll('#contentArea .panel, #contentArea section')];
   const panel=panels.find(p=>p.querySelector('table')&&/Data Perencanaan|Persetujuan Perencanaan|Pemeriksaan Data Perencanaan/i.test(p.textContent||''));
   if(!panel)return;
-  panel.classList.add('planning-panel-v128');
   const table=panel.querySelector('table');
   if(!table)return;
   const headRow=table.querySelector('thead tr');
