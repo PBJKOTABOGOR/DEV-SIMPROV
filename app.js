@@ -9345,3 +9345,180 @@ function formatDate(v){
   if(!v)return '';
   try{return formatTanggalID(v);}catch(e){try{return new Intl.DateTimeFormat('id-ID',{day:'2-digit',month:'long',year:'numeric'}).format(new Date(v));}catch(_){return String(v);}}
 }
+
+/* =========================================================
+   SIMPROV v134 - Revisi Surat, Header, Modal Access, Report UX
+   ========================================================= */
+(function(){
+  function suratStripHtmlV134(html){
+    return String(html||'').replace(/<[^>]*>/g,' ').replace(/&nbsp;/gi,' ').replace(/\s+/g,' ').trim();
+  }
+  function sanitizeRichHtmlV134(html){
+    let out=String(html||'').replace(/<script[\s\S]*?<\/script>/gi,'').replace(/on\w+\s*=\s*"[^"]*"/gi,'').replace(/on\w+\s*=\s*'[^']*'/gi,'').replace(/javascript:/gi,'');
+    const allowed=/(<\/?(p|br|b|strong|i|em|u|ul|ol|li|div|span)[^>]*>)/gi;
+    out=out.replace(/<(?!\/?(p|br|b|strong|i|em|u|ul|ol|li|div|span)\b)[^>]+>/gi,'');
+    out=out.replace(/<(div|span)([^>]*)>/gi,'<$1>');
+    out=out.replace(/<p><\/p>/gi,'<p><br></p>');
+    return out.trim();
+  }
+  function ensureVerifierModalRootV134(){
+    let modal=document.getElementById('verifierModalV65');
+    if(modal && modal.parentElement!==document.body){ document.body.appendChild(modal); }
+    if(!modal){
+      modal=document.createElement('div');
+      modal.id='verifierModalV65';
+      modal.className='modal-backdrop hidden';
+      document.body.appendChild(modal);
+    }
+    return modal;
+  }
+  const _renderManageV134 = renderManajemenAkunV65;
+  renderManajemenAkunV65 = function(){
+    _renderManageV134();
+    ensureVerifierModalRootV134();
+  };
+  const _verifierFormModalV134 = verifierFormModalV65;
+  verifierFormModalV65 = function(u){ ensureVerifierModalRootV134(); return _verifierFormModalV134(u); };
+  openCreateVerifierV65 = function(){ verifierFormModalV65(null); };
+  openEditVerifierV65 = function(id){ const u=verifierUsersV65().find(x=>String(x.id_user)===String(id)); if(u) verifierFormModalV65(u); };
+  closeVerifierModalV65 = function(){ const m=ensureVerifierModalRootV134(); m.className='modal-backdrop hidden'; m.innerHTML=''; };
+
+  function ppkGroupByBidangNameFrontV134(nama){
+    const n=String(nama||'').toLowerCase();
+    if(/kesekretariatan/.test(n)) return {key:'ketua_harian',label:'Ketua Harian',wakilKey:'wakil_ketua_harian',wakilLabel:'Wakil Ketua Harian'};
+    if(/penyiaran|pelayanan media|akomodasi|konsumsi|pengarahan massa|kesehatan/.test(n)) return {key:'ketua_i',label:'Ketua I',wakilKey:'wakil_ketua_i',wakilLabel:'Wakil Ketua I'};
+    if(/organisasi|hukum|keamanan|transportasi/.test(n)) return {key:'ketua_ii',label:'Ketua II',wakilKey:'wakil_ketua_ii',wakilLabel:'Wakil Ketua II'};
+    if(/pertandingan|perwasitan|sarana|prasarana pertandingan|teknologi informasi|komunikasi/.test(n)) return {key:'ketua_iii',label:'Ketua III',wakilKey:'wakil_ketua_iii',wakilLabel:'Wakil Ketua III'};
+    if(/kerjasama|usaha|pengadaan barang|pengadaan jasa/.test(n)) return {key:'sekretaris_umum',label:'Sekretaris Umum',wakilKey:'wakil_sekretaris',wakilLabel:'Wakil Sekretaris'};
+    return {key:'ketua_umum',label:'Ketua Bidang',wakilKey:'sekretaris_umum',wakilLabel:'Wakil Ketua'};
+  }
+  function assignedVerifierNameV134(){
+    const users=verifierUsersV65();
+    const idb=String(currentUser?.id_bidang||'');
+    const matched=users.find(u=>{
+      const role=actualRoleV133(u);
+      if(role!=='VERIFIKATOR_PBJ') return false;
+      const scope=String(u.bidang_akses||'').split(',').map(x=>x.trim());
+      return scope.includes(idb);
+    });
+    return matched?.nama || dashboard?.systemIdentity?.verifikator || 'belum diatur';
+  }
+  updateIdentityHeaderV77 = function(){
+    const info=document.getElementById('userInfo'); if(!info) return;
+    const i=dashboard?.systemIdentity||{};
+    const group=ppkGroupByBidangNameFrontV134(currentUser?.nama_bidang||'');
+    const ketua=i[group.key]||i.ketua_umum||'belum diatur';
+    const wakil=i[group.wakilKey]||i.sekretaris_umum||'belum diatur';
+    const ver=assignedVerifierNameV134();
+    const vals=[`Ketua Bidang: ${ketua}`,`${group.wakilLabel}: ${wakil}`,`Verifikator: ${ver}`];
+    let box=document.getElementById('systemIdentityV77');
+    if(!box){ box=document.createElement('div'); box.id='systemIdentityV77'; box.className='system-identity-v77'; info.insertAdjacentElement('afterend',box); }
+    box.innerHTML=vals.map(v=>`<span>${esc(v)}</span>`).join('');
+  };
+
+  function suratIncomingCountV134(list){
+    return (list||[]).filter(x=>String(x.status_surat||'').toUpperCase()!=='SELESAI').length;
+  }
+  function suratEditorToolbarV134(){
+    const btn=(cmd,label,title,extra='')=>`<button type="button" class="editor-btn-v134" onclick="execSuratEditorV134('${cmd}', ${extra||'null'})" title="${title}">${label}</button>`;
+    return `<div class="surat-editor-toolbar-v134">${btn('bold','B','Bold')}${btn('italic','I','Italic')}${btn('underline','U','Underline')}${btn('insertUnorderedList','• List','List Bullet')}${btn('insertOrderedList','1. List','List Numbering')}${btn('formatBlock','Paragraf','Paragraf','\'p\'')}${btn('formatBlock','Judul','Subjudul','\'h4\'')}<button type="button" class="editor-btn-v134" onclick="clearSuratFormatV134()" title="Bersihkan format">Clear</button></div>`;
+  }
+  window.execSuratEditorV134=function(cmd,value){ const ed=document.getElementById('suratIsiEditorV134'); if(!ed) return; ed.focus(); try{ document.execCommand(cmd,false,value); }catch(e){} updateSuratPreviewValueV134(); };
+  window.clearSuratFormatV134=function(){ const ed=document.getElementById('suratIsiEditorV134'); if(!ed) return; ed.focus(); try{ document.execCommand('removeFormat',false,null); }catch(e){} updateSuratPreviewValueV134(); };
+  window.updateSuratPreviewValueV134=function(){ const hidden=document.getElementById('suratIsiV133'); const ed=document.getElementById('suratIsiEditorV134'); if(hidden&&ed) hidden.value=sanitizeRichHtmlV134(ed.innerHTML); };
+
+  suratPipelineV133 = function(s){
+    const status=String(s.status_surat||'DRAFT').toUpperCase();
+    const steps=['Draft','Diajukan','Disetujui','Didisposisi','Tindak Lanjut','Selesai'];
+    let active=1;
+    if(status.includes('DIAJUKAN')) active=2;
+    if(s.persetujuan_digital||status.includes('DIDISPOSISIKAN')||status.includes('DITERUSKAN')||status==='SELESAI') active=Math.max(active,3);
+    if(status.includes('DIDISPOSISIKAN')) active=4;
+    if(status.includes('DITERUSKAN')) active=5;
+    if(status==='SELESAI') active=6;
+    const returned=status.includes('PERBAIKAN');
+    const returnBanner=returned?`<div class="surat-return-banner-v134"><b>Dikembalikan untuk perbaikan</b><span>${esc(s.disposisi_catatan||'Periksa catatan dan ajukan ulang setelah diperbaiki.')}</span></div>`:'';
+    return `${returnBanner}<div class="surat-pipeline-v133">${steps.map((x,i)=>`<div class="${i+1<active?'done':i+1===active?'active':''}"><span>${i+1}</span><b>${x}</b></div>`).join('')}</div>`;
+  };
+
+  suratActionButtonsV133 = function(s){
+    const role=actualRoleV133(),status=String(s.status_surat||'').toUpperCase(),own=String(s.asal_id_user||'')===String(currentUser?.id_user||'');
+    const out=[`<button class="btn-soft" onclick="printNotaDinasV133('${esc(s.id_surat)}')">Lihat / Cetak Nota Dinas</button>`];
+    if(own&&['DRAFT','PERLU PERBAIKAN'].includes(status)) out.push(`<button onclick="editSuratV133('${esc(s.id_surat)}')">${status==='DRAFT'?'Lanjutkan Draft':'Perbaiki & Ajukan Ulang'}</button>`);
+    if((role==='PIMPINAN'||role==='ADMIN')&&status==='DIAJUKAN KE PIMPINAN') out.push(`<button class="btn-green" onclick="openSuratActionV133('${esc(s.id_surat)}','PIMPINAN')">Periksa & Disposisi</button>`);
+    if((role==='VERIFIKATOR_KEUANGAN'||role==='ADMIN')&&status==='DIDISPOSISIKAN KE VERIFIKATOR KEUANGAN') out.push(`<button class="btn-green" onclick="openSuratActionV133('${esc(s.id_surat)}','KEUANGAN')">Verifikasi Surat</button>`);
+    if((role==='BENDAHARA'||role==='ADMIN')&&status==='DITERUSKAN KE BENDAHARA') out.push(`<button class="btn-green" onclick="openSuratActionV133('${esc(s.id_surat)}','SELESAI')">Selesaikan Tindak Lanjut</button>`);
+    if(role==='BIDANG'&&status==='DIDISPOSISIKAN KE BIDANG'&&String(s.current_bidang||'')===String(currentUser?.id_bidang||'')) out.push(`<button class="btn-green" onclick="openSuratActionV133('${esc(s.id_surat)}','SELESAI')">Tandai Selesai</button>`);
+    return out.join('');
+  };
+
+  suratCardV133 = function(s){
+    const bidangTujuan=suratWorkspaceV133.bidangs.find(b=>String(b.id_bidang)===String(s.tujuan_bidang))?.nama_bidang||s.tujuan_bidang||'-';
+    const asalBidang=bidangName(s.asal_bidang)||s.asal_bidang||'-';
+    const tujuanLabel=s.tujuan_role==='BIDANG'?bidangTujuan:(s.tujuan_role||'-');
+    const summaryHtml=sanitizeRichHtmlV134(s.isi_ringkas||'')||'<p>-</p>';
+    return `<article class="surat-card-v133"><div class="surat-card-head-v133"><div><small>${esc(s.jenis_surat||'NOTA DINAS')} • ${esc(s.nomor_surat||'BELUM BERNOMOR')}</small><h4>${esc(s.perihal||'-')}</h4><div class="surat-meta-grid-v134"><span><b>Pengirim:</b> ${esc(s.asal_nama||'-')}</span><span><b>Bidang:</b> ${esc(asalBidang)}</span><span><b>Klasifikasi:</b> ${esc(s.klasifikasi||'UMUM')}</span><span><b>Tanggal:</b> ${esc(formatDate(s.tanggal_surat||s.created_at)||'-')}</span><span><b>Tujuan:</b> ${esc(tujuanLabel)}</span><span><b>Status:</b> ${esc(s.status_surat||'DRAFT')}</span></div></div>${suratStatusChipV133(s.status_surat)}</div>${suratPipelineV133(s)}<div class="surat-summary-v133"><div class="surat-rich-view-v134">${summaryHtml}</div>${s.disposisi_catatan?`<div><b>Catatan Disposisi:</b> ${esc(s.disposisi_catatan)}</div>`:''}${s.url_file?`<div><a href="${esc(s.url_file)}" target="_blank" rel="noopener">Lampiran: ${esc(s.nama_file||'Lampiran')}</a></div>`:''}</div><details class="surat-history-v133"><summary>Riwayat Surat</summary><pre>${esc(s.riwayat_surat||'Belum ada riwayat')}</pre></details><div class="action-group surat-actions-v133">${suratActionButtonsV133(s)}</div></article>`;
+  };
+
+  suratFormV133 = function(){
+    const s=suratWorkspaceV133.surat.find(x=>String(x.id_surat)===String(suratEditIdV133));
+    const today=new Date().toISOString().slice(0,10);
+    const initialHtml=sanitizeRichHtmlV134(s?.isi_ringkas||'<p></p>') || '<p></p>';
+    return `<section class="panel fade-up premium-panel surat-form-panel-v133"><div class="panel-title-row"><div><h3>${s?'Perbaiki Nota Dinas':'Buat Surat'}</h3><p class="panel-sub">Jenis surat yang tersedia saat ini: Nota Dinas. Nomor surat mengikuti proses TND/SRIKANDI.</p></div>${s?`<button class="btn-soft" onclick="cancelEditSuratV133()">Batal Edit</button>`:''}</div><div class="form-grid"><div class="field"><label>Jenis Surat</label><input value="Nota Dinas" readonly></div><div class="field"><label>Nomor Nota Dinas</label><input id="suratNomorV133" value="${esc(s?.nomor_surat||'')}" placeholder="Contoh: 10234/NotaDinas/140726"></div><div class="field"><label>Tanggal Surat</label><input id="suratTanggalV133" type="date" value="${esc(normalizeDateForInputV61(s?.tanggal_surat)||today)}"></div><div class="field"><label>Sifat</label><select id="suratSifatV133"><option ${String(s?.sifat).toUpperCase()==='BIASA'?'selected':''}>BIASA</option><option ${String(s?.sifat).toUpperCase()==='PENTING'?'selected':''}>PENTING</option><option ${String(s?.sifat).toUpperCase()==='SEGERA'?'selected':''}>SEGERA</option></select></div><div class="field"><label>Klasifikasi</label><select id="suratKlasifikasiV133"><option value="UMUM" ${String(s?.klasifikasi).toUpperCase()!=='PENCAIRAN'?'selected':''}>Umum / Disposisi Bidang</option><option value="PENCAIRAN" ${String(s?.klasifikasi).toUpperCase()==='PENCAIRAN'?'selected':''}>Pencairan</option></select></div><div class="field span-2"><label>Perihal</label><input id="suratPerihalV133" value="${esc(s?.perihal||'')}" placeholder="Perihal Nota Dinas"></div><div class="field full"><label>Isi Nota Dinas</label>${suratEditorToolbarV134()}<div id="suratIsiEditorV134" class="surat-editor-v134" contenteditable="true" oninput="updateSuratPreviewValueV134()">${initialHtml}</div><input type="hidden" id="suratIsiV133" value="${esc(initialHtml)}"><small class="field-help-v133">Gunakan toolbar untuk bold, daftar, dan paragraf agar isi surat lebih rapi seperti editor dokumen.</small></div><div class="field full"><label>Lampiran (opsional, maksimal 2 MB)</label><input id="suratFileV133" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"></div></div><div class="surat-form-note-v133">Nota Dinas yang diajukan akan masuk ke Pimpinan. Nota Dinas pencairan yang disetujui diteruskan ke Verifikator Keuangan, kemudian Bendahara.</div><div class="action-group"><button class="btn-soft" onclick="saveSuratV133(false)">Simpan Draft</button><button onclick="saveSuratV133(true)">Ajukan ke Pimpinan</button></div></section>`;
+  };
+
+  renderSuratV133 = function(){
+    const area=document.getElementById('contentArea');if(!area)return;
+    if(!suratWorkspaceV133.loaded){area.innerHTML=`<section class="panel premium-panel surat-loading-v133"><h3>Surat</h3><div class="skeleton-v133"></div><div class="skeleton-v133 short"></div></section>`;return;}
+    const role=actualRoleV133(),canCreate=(role==='BIDANG'||role==='ADMIN'||role==='VERIFIKATOR_PBJ'||role==='VERIFIKATOR_KEUANGAN'||role==='BENDAHARA'||role==='PIMPINAN');
+    const all=suratWorkspaceV133.surat||[],incoming=all.filter(suratIsIncomingV133),own=all.filter(s=>String(s.asal_id_user||'')===String(currentUser?.id_user||''));
+    const body=suratTabV133==='BUAT'?`${suratFormV133()}<section class="panel premium-panel" id="suratSayaPanelV134"><h3>Surat Saya</h3><p class="panel-sub">Surat yang sudah dibuat, diajukan, atau dikembalikan untuk perbaikan akan tampil di sini.</p><div class="surat-list-v133">${own.map(suratCardV133).join('')||'<p class="empty">Belum ada surat yang dibuat.</p>'}</div></section>`:`<section class="panel fade-up premium-panel"><div class="panel-title-row"><div><h3>Surat Masuk</h3><p class="panel-sub">Daftar Nota Dinas yang memerlukan persetujuan, disposisi, atau tindak lanjut.</p></div><button class="btn-refresh" onclick="loadSuratWorkspaceV133(true)">Refresh</button></div><div class="surat-list-v133 surat-incoming-list-v134">${incoming.map(suratCardV133).join('')||'<p class="empty">Tidak ada surat masuk yang perlu ditindaklanjuti.</p>'}</div></section>`;
+    area.innerHTML=`<section class="panel premium-panel surat-head-v133"><div class="panel-title-row"><div><h3>Surat</h3><p class="panel-sub">Pembuatan, persetujuan elektronik, disposisi, dan tindak lanjut Nota Dinas.</p></div></div><div class="surat-tabs-v133">${canCreate?`<button class="${suratTabV133==='BUAT'?'active':''}" onclick="setSuratTabV133('BUAT')">Buat Surat</button>`:''}<button class="${suratTabV133==='MASUK'?'active':''}" onclick="setSuratTabV133('MASUK')">Surat Masuk <span>${suratIncomingCountV134(incoming)}</span></button></div></section>${body}<div id="suratActionModalV133" class="modal-backdrop hidden"></div>`;
+    setTimeout(updateSuratPreviewValueV134,0);
+  };
+
+  saveSuratV133 = async function(submit){
+    const file=document.getElementById('suratFileV133')?.files?.[0];
+    const nomor=document.getElementById('suratNomorV133')?.value.trim()||'';
+    const perihal=document.getElementById('suratPerihalV133')?.value.trim()||'';
+    const tanggal=document.getElementById('suratTanggalV133')?.value||'';
+    updateSuratPreviewValueV134();
+    const isiHtml=sanitizeRichHtmlV134(document.getElementById('suratIsiV133')?.value||'');
+    const isiText=suratStripHtmlV134(isiHtml);
+    if(!perihal||!tanggal||!isiText){ alert('Perihal, tanggal, dan isi Nota Dinas wajib diisi.'); return; }
+    if(file&&file.size>MAX_UPLOAD_BYTES_V133){ alert('Ukuran lampiran maksimal 2 MB.'); return; }
+    const ok=await confirmActionV133({title:submit?'Ajukan Nota Dinas':'Simpan Draft Nota Dinas',message:submit?'Nota Dinas akan diajukan kepada Pimpinan dan tercatat pada Surat Saya.':'Draft akan disimpan dan masih dapat diedit kembali.',confirmText:submit?'Ya, Ajukan':'Ya, Simpan'}); if(!ok) return;
+    const data={id_surat:suratEditIdV133,nomor_surat:nomor,tanggal_surat:tanggal,sifat:document.getElementById('suratSifatV133')?.value||'BIASA',klasifikasi:document.getElementById('suratKlasifikasiV133')?.value||'UMUM',perihal,isi_ringkas:isiHtml,submit};
+    showLoading(submit?'Mengajukan Nota Dinas...':'Menyimpan draft Nota Dinas...');
+    try{
+      if(file){ data.file_name=file.name; data.mime_type=file.type; data.file_base64=await fileToBase64(file); }
+      const r=await apiPost({action:'saveSuratV133',user:currentUser,data});
+      if(!r.success) throw new Error(r.message||'Gagal menyimpan surat');
+      suratEditIdV133=''; sessionStorage.removeItem(suratCacheKeyV133()); await loadSuratWorkspaceV133(true); suratTabV133='BUAT'; renderSuratV133();
+      setTimeout(()=>document.getElementById('suratSayaPanelV134')?.scrollIntoView({behavior:'smooth',block:'start'}),80);
+      alert(r.message||'Nota Dinas berhasil diproses');
+    }catch(e){ alert(e.message||String(e)); }finally{ hideLoading(); }
+  };
+
+  openSuratActionV133 = function(id,mode){
+    const s=suratWorkspaceV133.surat.find(x=>String(x.id_surat)===String(id)),m=document.getElementById('suratActionModalV133'); if(!s||!m) return;
+    const bidangOptions=(suratWorkspaceV133.bidangs||[]).map(b=>`<option value="${esc(b.id_bidang)}">${esc(b.nama_bidang)}</option>`).join('');
+    let content='';
+    if(mode==='PIMPINAN') content=`<div class="field"><label>Tujuan Disposisi</label>${String(s.klasifikasi).toUpperCase()==='PENCAIRAN'?'<input value="Verifikator Keuangan → Bendahara" readonly>':`<select id="suratTujuanBidangV133"><option value="">Pilih bidang tujuan</option>${bidangOptions}</select>`}</div><div class="field full"><label>Catatan Disposisi</label><textarea id="suratActionCatatanV133" rows="4" placeholder="Arahan Pimpinan"></textarea></div><div class="approval-statement-v133">Dengan memilih <b>Setujui & Disposisikan</b>, saya menyatakan Nota Dinas ini telah diperiksa, disetujui, dan diberi disposisi secara elektronik melalui SIMPROV.</div><div class="modal-actions"><button class="btn-danger" onclick="submitSuratActionV133('${esc(id)}','KEMBALIKAN')">Kembalikan untuk Perbaikan</button><button class="btn-green" onclick="submitSuratActionV133('${esc(id)}','SETUJUI_DAN_DISPOSISI')">Setujui & Disposisikan</button></div>`;
+    else if(mode==='KEUANGAN') content=`<div class="field full"><label>Catatan Verifikasi Keuangan</label><textarea id="suratActionCatatanV133" rows="4" placeholder="Catatan pemeriksaan atau arahan kepada Bendahara"></textarea></div><div class="modal-actions"><button class="btn-danger" onclick="submitSuratActionV133('${esc(id)}','KEMBALIKAN')">Kembalikan untuk Perbaikan</button><button class="btn-green" onclick="submitSuratActionV133('${esc(id)}','TERUSKAN_KE_BENDAHARA')">Teruskan ke Bendahara</button></div>`;
+    else content=`<div class="field full"><label>Catatan Penyelesaian</label><textarea id="suratActionCatatanV133" rows="4" placeholder="Ringkasan tindak lanjut"></textarea></div><div class="modal-actions"><button class="btn-soft" onclick="closeSuratActionV133()">Batal</button><button class="btn-green" onclick="submitSuratActionV133('${esc(id)}','SELESAIKAN')">Tandai Selesai</button></div>`;
+    m.className='modal-backdrop';
+    m.innerHTML=`<div class="modal-card surat-action-card-v133 fade-up"><div class="modal-head"><div><h3>Tindak Lanjut Nota Dinas</h3><p>${esc(s.nomor_surat||'Belum bernomor')} • ${esc(s.perihal)}</p></div><button class="btn-soft" onclick="closeSuratActionV133()">Tutup</button></div><div class="surat-action-meta-v134"><div><b>Pengirim</b><span>${esc(s.asal_nama||'-')}</span></div><div><b>Bidang</b><span>${esc(bidangName(s.asal_bidang)||s.asal_bidang||'-')}</span></div><div><b>Status Saat Ini</b><span>${esc(s.status_surat||'-')}</span></div></div>${content}</div>`;
+  };
+
+  printNotaDinasV133 = function(id){
+    const s=suratWorkspaceV133.surat.find(x=>String(x.id_surat)===String(id)); if(!s) return;
+    const w=window.open('','_blank'); if(!w) return alert('Popup diblokir browser. Izinkan popup untuk melihat/cetak Nota Dinas.');
+    const bodyHtml=sanitizeRichHtmlV134(s.isi_ringkas||'<p>-</p>');
+    const lampiranBlock=s.url_file?`<div class="page-break"></div><div class="lampiran-page"><h3>LAMPIRAN</h3><p><b>Nama File:</b> ${esc(s.nama_file||'Lampiran')}</p><p><b>Tautan Dokumen:</b> <a href="${esc(s.url_file)}" target="_blank" rel="noopener">${esc(s.url_file)}</a></p><p class="lampiran-note">Lampiran berada pada halaman setelah isi surat agar paket nota dinas dan lampiran tercatat dalam satu berkas cetak/digital.</p></div>`:'';
+    const sender=`<div class="sign-box left"><div class="sign-title">Mengetahui / Menyetujui</div>${s.persetujuan_digital?`<div class="ttd-mark">TTE SIMPROV</div><div class="sign-name"><b>${esc(s.disetujui_oleh||'Pimpinan')}</b></div><div class="sign-role">Pimpinan</div><small>${esc(s.persetujuan_digital)}</small>`:`<div class="sign-space"></div><div class="sign-name"><b>Belum disetujui</b></div><div class="sign-role">Pimpinan</div>`}</div>`;
+    const pengirim=`<div class="sign-box right"><div class="sign-title">Pengirim</div><div class="sign-space"></div><div class="sign-name"><b>${esc(s.asal_nama||'-')}</b></div><div class="sign-role">${esc(roleLabelV133(s.asal_role||'BIDANG'))}</div><small>TTE Pengirim • SIMPROV</small></div>`;
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Nota Dinas ${esc(s.nomor_surat||'')}</title><style>@page{size:A4;margin:16mm}*{box-sizing:border-box}body{font-family:Georgia, 'Times New Roman', serif;color:#111;font-size:12pt;line-height:1.48;margin:0}.toolbar{position:sticky;top:0;padding:10px 14px;background:#eef6fd;border-bottom:1px solid #d1e2ee;display:flex;justify-content:flex-end;gap:8px}.toolbar button{border:0;border-radius:8px;padding:9px 14px;font-weight:700;cursor:pointer}.print{background:#0f6fb3;color:#fff}.close{background:#e9eef3}.sheet{padding:12px 4px}.title{text-align:center;margin:0 0 18px}.title h2{margin:0 0 4px;font-size:18pt}.title .nomor{font-size:11pt}.meta{width:100%;border-collapse:collapse;margin-bottom:14px}.meta td{padding:1px 4px;vertical-align:top}.meta td:first-child{width:110px}.meta td:nth-child(2){width:12px}.isi{line-height:1.55;text-align:justify}.isi p{margin:0 0 10px}.isi ul,.isi ol{margin:0 0 10px 24px}.ttd-row{display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-top:28px;align-items:end}.sign-box{text-align:center}.sign-title{font-weight:700;margin-bottom:8px}.ttd-mark{display:inline-block;padding:6px 10px;border:1px dashed #2563a6;border-radius:10px;color:#2563a6;font-size:10pt;font-weight:700}.sign-space{height:72px}.sign-name{margin-top:8px}.sign-role{font-size:10pt}.page-break{page-break-before:always}.lampiran-page h3{text-align:center;margin-top:0}.lampiran-note{font-size:10pt;color:#455}.footer{margin-top:18px;font-size:9.5pt;color:#566}@media print{.toolbar{display:none}.sheet{padding:0}}</style></head><body><div class="toolbar"><button class="close" onclick="window.close()">Tutup</button><button class="print" onclick="window.print()">Cetak / Simpan PDF</button></div><div class="sheet"><div class="title"><h2>NOTA DINAS</h2><div class="nomor">Nomor: ${esc(s.nomor_surat||'-')}</div></div><table class="meta"><tr><td>Kepada</td><td>:</td><td>${esc(s.tujuan_role==='BIDANG'?(suratWorkspaceV133.bidangs.find(b=>String(b.id_bidang)===String(s.tujuan_bidang))?.nama_bidang||s.tujuan_bidang||'-'):(s.tujuan_role||'PIMPINAN'))}</td></tr><tr><td>Dari</td><td>:</td><td>${esc(s.asal_nama||'-')} ${s.asal_bidang?`(${esc(bidangName(s.asal_bidang)||s.asal_bidang)})`:''}</td></tr><tr><td>Tanggal</td><td>:</td><td>${esc(formatDate(s.tanggal_surat)||'-')}</td></tr><tr><td>Sifat</td><td>:</td><td>${esc(s.sifat||'BIASA')}</td></tr><tr><td>Perihal</td><td>:</td><td>${esc(s.perihal||'-')}</td></tr></table><div class="isi">${bodyHtml}</div><div class="ttd-row">${sender}${pengirim}</div><div class="footer">Dokumen dibuat dan dicatat melalui SIMPROV • ID Surat: ${esc(s.id_surat||'-')}</div>${lampiranBlock}</div></body></html>`);
+    w.document.close();
+  };
+})();
