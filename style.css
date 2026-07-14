@@ -2768,3 +2768,63 @@ body.modal-open-v122{overflow:hidden}
   #hpsOptionalModalV121 .hps-table-wrap-v126{overflow-x:auto!important}
   #hpsOptionalModalV121 .hps-table-v105{min-width:1050px!important;table-layout:auto}
 }
+
+/* =========================================================
+   SIMPROV v133 - UI akses, surat, konfirmasi, dan sesi
+   ========================================================= */
+#verifierModalV65.modal-backdrop.access-modal-v133{position:fixed!important;inset:0!important;z-index:25000!important;display:grid!important;place-items:center!important;padding:22px!important;background:rgba(17,42,66,.38)!important;backdrop-filter:blur(8px)!important}
+#verifierModalV65.hidden{display:none!important}
+.access-card-v133{width:min(1120px,96vw)!important;max-height:92vh!important;overflow:auto!important}
+.access-card-v133 .account-scope-grid{max-height:320px;overflow:auto;padding:10px;border:1px solid #d9e8f3;border-radius:15px;background:#f8fcff}
+.optional-scope-v133{opacity:.66}
+.optional-scope-v133:before{content:'Opsional untuk role ini';display:inline-block;margin-bottom:8px;padding:5px 9px;border-radius:999px;background:#edf4f8;color:#61758a;font-size:11px;font-weight:800}
+.field-help-v133{margin:3px 0 10px;color:#73869a;font-size:12px}
+.account-card-v133{grid-template-columns:minmax(220px,1.15fr) minmax(150px,.65fr) minmax(260px,1.4fr) 100px 70px!important}
+
+.confirm-v133{z-index:32000!important}
+.confirm-card-v133{width:min(480px,94vw)!important;text-align:center;padding:28px!important}
+.confirm-card-v133 h3{margin:12px 0 8px;color:#123f70}
+.confirm-card-v133 p{margin:0 0 20px;color:#61758a;line-height:1.55}
+.confirm-icon-v133{width:56px;height:56px;margin:auto;border-radius:50%;display:grid;place-items:center;background:#dff7e8;color:#138244;font-size:28px;font-weight:900}
+.confirm-icon-v133.danger{background:#ffe6e4;color:#c8322c}
+.confirm-card-v133 .modal-actions{justify-content:center}
+
+.surat-head-v133{padding-bottom:14px!important}
+.surat-tabs-v133{display:flex;gap:8px;flex-wrap:wrap}
+.surat-tabs-v133 button{background:#f6fbff;color:#164979;border:1px solid #d5e7f4;box-shadow:none}
+.surat-tabs-v133 button.active{background:linear-gradient(135deg,#0f5d99,#18a7da);color:#fff;border-color:transparent}
+.surat-tabs-v133 button span{display:inline-grid;place-items:center;min-width:23px;height:23px;margin-left:6px;padding:0 6px;border-radius:999px;background:rgba(255,255,255,.25);font-size:11px}
+.surat-form-panel-v133 textarea{resize:vertical;min-height:150px}
+.surat-form-note-v133{margin:12px 0;padding:13px 15px;border-left:4px solid #169fd4;border-radius:10px;background:#edf8ff;color:#335d7b;font-size:13px;line-height:1.5}
+.surat-list-v133{display:grid;gap:14px;margin-top:16px}
+.surat-card-v133{padding:18px;border:1px solid #d9e8f3;border-radius:17px;background:linear-gradient(135deg,#fff,#f9fcff);box-shadow:0 8px 22px rgba(23,73,110,.06)}
+.surat-card-head-v133{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}
+.surat-card-head-v133 small{font-size:11px;font-weight:900;color:#1573aa;letter-spacing:.04em}
+.surat-card-head-v133 h4{margin:5px 0 6px;color:#123f70;font-size:19px}
+.surat-card-head-v133 p{margin:0;color:#718398;font-size:12px}
+.surat-status-v133{display:inline-flex;align-items:center;justify-content:center;max-width:250px;padding:7px 10px;border-radius:999px;font-size:10px;font-weight:900;text-align:center;white-space:normal}
+.surat-status-v133.gray{background:#edf2f6;color:#617386}.surat-status-v133.blue{background:#e1f2ff;color:#0b6da8}.surat-status-v133.green{background:#dcf8e5;color:#147c3e}.surat-status-v133.red{background:#ffe2df;color:#b9312b}
+.surat-pipeline-v133{display:grid;grid-template-columns:repeat(6,minmax(100px,1fr));gap:6px;margin:16px 0;overflow:auto;padding-bottom:3px}
+.surat-pipeline-v133>div{min-width:105px;padding:10px;border-radius:12px;border:1px solid #dfeaf2;background:#f6f8fa;color:#7a8997;display:flex;align-items:center;gap:8px}
+.surat-pipeline-v133 span{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;background:#e4ebf0;font-weight:900;font-size:11px}
+.surat-pipeline-v133 b{font-size:11px}
+.surat-pipeline-v133 .done{background:#edfbf2;border-color:#b9e7c8;color:#1a7e42}.surat-pipeline-v133 .done span{background:#24aa5c;color:#fff}.surat-pipeline-v133 .active{background:#eaf6ff;border-color:#93caf0;color:#0e6ca6}.surat-pipeline-v133 .active span{background:#178ec8;color:#fff}
+.surat-summary-v133{padding:13px 15px;border-radius:12px;background:#f8fbfd;color:#435f75;font-size:13px;line-height:1.55}
+.surat-summary-v133 p{margin:0 0 10px;white-space:pre-wrap}.surat-summary-v133>div{margin-top:5px}
+.surat-history-v133{margin-top:10px;border:1px solid #dce8f1;border-radius:11px;padding:10px 12px;background:#fff}
+.surat-history-v133 summary{cursor:pointer;color:#174d7c;font-weight:800;font-size:12px}.surat-history-v133 pre{white-space:pre-wrap;font-family:inherit;font-size:12px;line-height:1.55;color:#53697b}
+.surat-actions-v133{margin-top:12px;display:flex;flex-wrap:wrap;gap:8px}
+.surat-action-card-v133{width:min(760px,95vw)!important;max-height:90vh;overflow:auto}
+.approval-statement-v133{margin:14px 0;padding:14px;border:1px solid #a9d8ef;border-radius:12px;background:#eef9ff;color:#285a78;line-height:1.5}
+.surat-loading-v133{min-height:230px}.skeleton-v133{height:48px;margin-top:15px;border-radius:12px;background:linear-gradient(90deg,#edf3f7 25%,#f8fbfd 45%,#edf3f7 65%);background-size:240% 100%;animation:skeletonV133 1.2s linear infinite}.skeleton-v133.short{width:65%}@keyframes skeletonV133{to{background-position:-240% 0}}
+.finance-stage-v133{border-top-color:#23a261!important}.finance-stage-v133 h3{margin:0 0 8px}.finance-stage-v133 p{color:#65798d}
+.idle-warning-v133{position:fixed;right:18px;bottom:18px;z-index:31000;display:flex;align-items:center;gap:12px;max-width:520px;padding:14px 16px;border-radius:14px;background:#fff7db;color:#745300;border:1px solid #f2d17c;box-shadow:0 18px 50px rgba(40,49,59,.2)}
+.idle-warning-v133 button{padding:8px 12px;font-size:12px}
+
+@media(max-width:900px){
+  .account-card-v133{grid-template-columns:1fr!important;gap:10px!important}
+  .surat-card-head-v133{flex-direction:column}
+  .surat-status-v133{max-width:100%}
+  .surat-pipeline-v133{grid-template-columns:repeat(6,130px)}
+  .idle-warning-v133{left:10px;right:10px;bottom:10px;flex-direction:column;align-items:stretch}
+}
