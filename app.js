@@ -9890,7 +9890,7 @@ function formatDate(v){
     const pending=String(s?.status_surat||'').toUpperCase()==='DIAJUKAN KE PIMPINAN';
     const tujuan=pending?'Pimpinan':(isCombinedClassV136(s?.klasifikasi)?`${tujuanBidang} + Verifikator Keuangan`:(s?.tujuan_role==='BIDANG'?tujuanBidang:(s?.tujuan_role||'Pimpinan')));
     const html=sanitizeSuratHtmlV136(s?.isi_ringkas||'<p>-</p>');
-    return `<details class="surat-package-card-v136"><summary><span class="surat-number-v136">${no}</span><div class="surat-summary-title-v136"><b>${esc(s?.perihal||'-')}</b><small>Surat ke-${no} • ${esc(formatDate(s?.tanggal_surat||s?.created_at)||'-')} • ${esc(s?.nomor_surat||'Belum bernomor')}</small>${mode==='MASUK'?`<em>Dari ${esc(s?.asal_nama||'-')} — ${esc(asalBidang)}</em>`:''}</div>${suratStatusChipV133(s?.status_surat)}</summary><div class="surat-package-detail-v136">${suratPipelineV133(s)}<div class="surat-meta-grid-v134"><span><b>Pengirim:</b> ${esc(s?.asal_nama||'-')}</span><span><b>Pimpinan Bidang:</b> ${esc(senderSignatureNameV136(s))}</span><span><b>Bidang:</b> ${esc(asalBidang)}</span><span><b>Klasifikasi:</b> ${esc(klasifikasiLabelV136(s?.klasifikasi))}</span><span><b>Tujuan:</b> ${esc(tujuan)}</span><span><b>Tanggal:</b> ${esc(formatDate(s?.tanggal_surat||s?.created_at)||'-')}</span></div><div class="surat-summary-v133"><div class="surat-rich-view-v134">${html}</div>${s?.disposisi_catatan?`<div><b>Catatan Disposisi:</b> ${esc(s.disposisi_catatan)}</div>`:''}${s?.url_file?`<div><a href="${esc(s.url_file)}" target="_blank" rel="noopener">Lampiran: ${esc(s.nama_file||'Lampiran')}</a></div>`:''}</div><details class="surat-history-v133"><summary>Riwayat Surat</summary><pre>${esc(s?.riwayat_surat||'Belum ada riwayat')}</pre></details><div class="action-group surat-actions-v133">${suratActionButtonsV133(s)}</div></div></details>`;
+    return `<details class="surat-package-card-v136"><summary><span class="surat-number-v136">${no}</span><div class="surat-summary-title-v136"><b>${esc(s?.perihal||'-')}</b><small>Surat ke-${no} • ${esc(formatDate(s?.tanggal_surat||s?.created_at)||'-')} • ${esc(s?.nomor_surat||'Belum bernomor')}</small>${mode==='MASUK'?`<em>Dari ${esc(s?.asal_nama||'-')} — ${esc(asalBidang)}</em>`:''}</div>${suratStatusChipV133(s?.status_surat)}</summary><div class="surat-package-detail-v136">${suratPipelineV133(s)}<div class="surat-meta-grid-v134"><span><b>Pengirim:</b> ${esc(s?.asal_nama||'-')}</span><span><b>Pimpinan Bidang:</b> ${esc(senderSignatureNameV136(s))}</span><span><b>Bidang:</b> ${esc(asalBidang)}</span><span><b>Klasifikasi:</b> ${esc(klasifikasiLabelV136(s?.klasifikasi))}</span><span><b>Tujuan:</b> ${esc(tujuan)}</span><span><b>Tanggal:</b> ${esc(formatDate(s?.tanggal_surat||s?.created_at)||'-')}</span></div><div class="surat-summary-v133"><div class="surat-rich-view-v134">${html}</div>${s?.disposisi_catatan?`<div><b>Catatan Disposisi:</b> ${esc(s.disposisi_catatan)}</div>`:''}${s?.url_file?`<div><button type="button" class="btn-soft surat-attachment-btn-v137" onclick="lihatLampiranSuratV137('${esc(s.id_surat)}')">Lihat Lampiran: ${esc(s.nama_file||'Lampiran')}</button></div>`:''}</div><details class="surat-history-v133"><summary>Riwayat Surat</summary><pre>${esc(s?.riwayat_surat||'Belum ada riwayat')}</pre></details><div class="action-group surat-actions-v133">${suratActionButtonsV133(s)}</div></div></details>`;
   }
 
   renderSuratV133=function(){
@@ -9925,14 +9925,33 @@ function formatDate(v){
     try{const r=await apiPost({action:'actionSuratV133',user:currentUser,id_surat:id,keputusan,catatan,tujuan_bidang});if(!r.success)throw new Error(r.message||'Gagal memproses surat');closeSuratActionV133();sessionStorage.removeItem(suratCacheKeyV133());await loadSuratWorkspaceV133(true);renderSuratV133();alert(r.message);}catch(e){alert(e.message||String(e));}finally{hideLoading();}
   };
 
-  printNotaDinasV133=function(id){
+  printNotaDinasV133=async function(id){
     const s=(suratWorkspaceV133.surat||[]).find(x=>String(x.id_surat)===String(id));if(!s)return;
     const w=window.open('','_blank');if(!w)return alert('Popup diblokir browser. Izinkan popup untuk melihat/cetak Nota Dinas.');
+    w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Menyiapkan Nota Dinas...</title><style>body{font-family:Arial,sans-serif;display:grid;place-items:center;min-height:90vh;color:#174f75}.load{padding:24px;border:1px solid #cfe1ed;border-radius:16px;background:#f7fcff}</style></head><body><div class="load">Menyiapkan Nota Dinas dan lampiran...</div></body></html>');w.document.close();
+    let lampiranData=null;
+    if(s.url_file){
+      try{
+        const r=await apiPost({action:'getSuratLampiranV137',user:currentUser,id_surat:id});
+        if(r?.success&&r.base64)lampiranData=r;
+      }catch(e){console.warn('Lampiran surat tidak dapat dimuat melalui sistem',e);}
+    }
     const body=sanitizeSuratHtmlV136(s.isi_ringkas||'<p>-</p>'),senderName=senderSignatureNameV136(s),senderSigned=!!s.pengirim_ttd_digital||String(s.status_surat||'').toUpperCase()!=='DRAFT';
     const approval=`<div class="sign-box"><div class="sign-title">Mengetahui / Menyetujui</div>${s.persetujuan_digital?`<div class="ttd-mark">TTE SIMPROV</div><div class="sign-name"><b>${esc(s.disetujui_oleh||'Pimpinan')}</b></div><div class="sign-role">Pimpinan</div><small>${esc(s.persetujuan_digital)}</small>`:`<div class="sign-space"></div><div class="sign-name"><b>Belum disetujui</b></div><div class="sign-role">Pimpinan</div>`}</div>`;
     const sender=`<div class="sign-box"><div class="sign-title">Pengirim</div>${senderSigned?`<div class="ttd-mark">TTE SIMPROV</div><div class="sign-name"><b>${esc(senderName)}</b></div><div class="sign-role">Pimpinan Bidang</div><small>${esc(s.pengirim_ttd_digital||'Ditandatangani secara elektronik melalui SIMPROV')}</small>`:`<div class="sign-space"></div><div class="sign-name"><b>${esc(senderName)}</b></div><div class="sign-role">Pimpinan Bidang</div>`}</div>`;
-    const lampiran=s.url_file?`<div class="page-break"></div><section class="lampiran"><h3>LAMPIRAN NOTA DINAS</h3><p><b>Nama file:</b> ${esc(s.nama_file||'Lampiran')}</p><p><b>Tautan:</b> <a href="${esc(s.url_file)}" target="_blank" rel="noopener">Buka lampiran</a></p><iframe src="${esc(s.url_file)}" title="Lampiran"></iframe></section>`:'';
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Nota Dinas ${esc(s.nomor_surat||'')}</title><style>@page{size:A4;margin:17mm}*{box-sizing:border-box}body{font-family:Georgia,'Times New Roman',serif;color:#111;font-size:12pt;line-height:1.5;margin:0}.toolbar{position:sticky;top:0;z-index:5;padding:10px;background:#eef8ff;display:flex;justify-content:flex-end;gap:8px}.toolbar button{border:1px solid #bcd8ea;border-radius:9px;padding:9px 14px;background:#f7fcff;color:#14517d;font-weight:700}.sheet{padding:10px 2px}.title{text-align:center;margin-bottom:18px}.title h2{margin:0 0 5px}.meta{width:100%;border-collapse:collapse;margin-bottom:18px}.meta td{padding:2px 4px;vertical-align:top}.meta td:first-child{width:105px}.meta td:nth-child(2){width:12px}.isi{text-align:justify;line-height:1.55}.isi p{margin:0 0 9px}.isi ul,.isi ol{margin:0 0 9px 25px}.ttd-row{display:grid;grid-template-columns:1fr 1fr;gap:44px;margin-top:34px}.sign-box{text-align:center}.sign-title{font-weight:700;margin-bottom:10px}.ttd-mark{display:inline-block;border:1px dashed #2673aa;color:#2673aa;border-radius:9px;padding:6px 10px;font-size:9.5pt;font-weight:700}.sign-space{height:66px}.sign-name{margin-top:10px}.sign-role{font-size:10pt}.sign-box small{display:block;color:#29648e;font-size:8.5pt;margin-top:5px}.footer{margin-top:28px;color:#607080;font-size:9pt}.page-break{page-break-before:always}.lampiran h3{text-align:center}.lampiran iframe{width:100%;height:760px;border:1px solid #ccd8e2;margin-top:12px}@media print{.toolbar{display:none}.sheet{padding:0}.lampiran iframe{display:none}}</style></head><body><div class="toolbar"><button onclick="window.close()">Tutup</button><button onclick="window.print()">Cetak / Simpan PDF</button></div><main class="sheet"><div class="title"><h2>NOTA DINAS</h2><div>Nomor: ${esc(s.nomor_surat||'-')}</div></div><table class="meta"><tr><td>Kepada</td><td>:</td><td>Pimpinan</td></tr><tr><td>Dari</td><td>:</td><td>${esc(senderName)} (${esc(bidangName(s.asal_bidang)||bidangSuratV136(s.asal_bidang).nama_bidang||'-')})</td></tr><tr><td>Tanggal</td><td>:</td><td>${esc(formatDate(s.tanggal_surat)||'-')}</td></tr><tr><td>Sifat</td><td>:</td><td>${esc(s.sifat||'BIASA')}</td></tr><tr><td>Klasifikasi</td><td>:</td><td>${esc(klasifikasiLabelV136(s.klasifikasi))}</td></tr><tr><td>Perihal</td><td>:</td><td>${esc(s.perihal||'-')}</td></tr></table><div class="isi">${body}</div><div class="ttd-row">${approval}${sender}</div><div class="footer">Dokumen dibuat, ditandatangani, dan dicatat melalui SIMPROV • ID Surat: ${esc(s.id_surat||'-')}</div>${lampiran}</main></body></html>`);w.document.close();
+    let lampiran='';
+    if(s.url_file){
+      const nama=esc(lampiranData?.file_name||s.nama_file||'Lampiran'),mime=String(lampiranData?.mime_type||'').toLowerCase();
+      if(lampiranData?.base64){
+        const dataUrl=`data:${lampiranData.mime_type||'application/octet-stream'};base64,${lampiranData.base64}`;
+        const preview=mime.startsWith('image/')?`<img class="lampiran-img" src="${dataUrl}" alt="${nama}">`:mime==='application/pdf'?`<iframe class="lampiran-frame" src="${dataUrl}" title="${nama}"></iframe>`:`<div class="lampiran-file"><p>Pratinjau tidak tersedia untuk jenis file ini.</p><a download="${nama}" href="${dataUrl}">Unduh ${nama}</a></div>`;
+        lampiran=`<div class="page-break"></div><section class="lampiran"><h3>LAMPIRAN NOTA DINAS</h3><p><b>Nama file:</b> ${nama}</p><p class="lampiran-note">Lampiran dimuat langsung melalui SIMPROV sehingga tidak memerlukan izin Google Drive terpisah.</p>${preview}</section>`;
+      }else{
+        lampiran=`<div class="page-break"></div><section class="lampiran"><h3>LAMPIRAN NOTA DINAS</h3><p><b>Nama file:</b> ${nama}</p><p class="lampiran-error">Lampiran belum dapat dimuat. Tutup halaman ini lalu coba kembali.</p></section>`;
+      }
+    }
+    w.document.open();
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Nota Dinas ${esc(s.nomor_surat||'')}</title><style>@page{size:A4;margin:17mm}*{box-sizing:border-box}body{font-family:Georgia,'Times New Roman',serif;color:#111;font-size:12pt;line-height:1.5;margin:0}.toolbar{position:sticky;top:0;z-index:5;padding:10px;background:#eef8ff;display:flex;justify-content:flex-end;gap:8px}.toolbar button{border:1px solid #bcd8ea;border-radius:9px;padding:9px 14px;background:#f7fcff;color:#14517d;font-weight:700}.sheet{padding:10px 2px}.title{text-align:center;margin-bottom:18px}.title h2{margin:0 0 5px}.meta{width:100%;border-collapse:collapse;margin-bottom:18px}.meta td{padding:2px 4px;vertical-align:top}.meta td:first-child{width:105px}.meta td:nth-child(2){width:12px}.isi{text-align:justify;line-height:1.55}.isi p{margin:0 0 9px}.isi ul,.isi ol{margin:0 0 9px 25px}.ttd-row{display:grid;grid-template-columns:1fr 1fr;gap:44px;margin-top:34px}.sign-box{text-align:center}.sign-title{font-weight:700;margin-bottom:10px}.ttd-mark{display:inline-block;border:1px dashed #2673aa;color:#2673aa;border-radius:9px;padding:6px 10px;font-size:9.5pt;font-weight:700}.sign-space{height:66px}.sign-name{margin-top:10px}.sign-role{font-size:10pt}.sign-box small{display:block;color:#29648e;font-size:8.5pt;margin-top:5px}.footer{margin-top:28px;color:#607080;font-size:9pt}.page-break{page-break-before:always}.lampiran h3{text-align:center}.lampiran-note{font-size:10pt;color:#49687d}.lampiran-frame{width:100%;height:920px;border:1px solid #ccd8e2;margin-top:12px}.lampiran-img{display:block;max-width:100%;height:auto;margin:14px auto}.lampiran-file,.lampiran-error{padding:20px;border:1px solid #d4e2eb;border-radius:12px;background:#f7fbfe}.lampiran-file a{color:#126b9c;font-weight:700}@media print{.toolbar{display:none}.sheet{padding:0}.lampiran-frame{height:900px}}</style></head><body><div class="toolbar"><button onclick="window.close()">Tutup</button><button onclick="window.print()">Cetak / Simpan PDF</button></div><main class="sheet"><div class="title"><h2>NOTA DINAS</h2><div>Nomor: ${esc(s.nomor_surat||'-')}</div></div><table class="meta"><tr><td>Kepada</td><td>:</td><td>Pimpinan</td></tr><tr><td>Dari</td><td>:</td><td>${esc(senderName)} (${esc(bidangName(s.asal_bidang)||bidangSuratV136(s.asal_bidang).nama_bidang||'-')})</td></tr><tr><td>Tanggal</td><td>:</td><td>${esc(formatDate(s.tanggal_surat)||'-')}</td></tr><tr><td>Sifat</td><td>:</td><td>${esc(s.sifat||'BIASA')}</td></tr><tr><td>Klasifikasi</td><td>:</td><td>${esc(klasifikasiLabelV136(s.klasifikasi))}</td></tr><tr><td>Perihal</td><td>:</td><td>${esc(s.perihal||'-')}</td></tr></table><div class="isi">${body}</div><div class="ttd-row">${approval}${sender}</div><div class="footer">Dokumen dibuat, ditandatangani, dan dicatat melalui SIMPROV • ID Surat: ${esc(s.id_surat||'-')}</div>${lampiran}</main></body></html>`);w.document.close();
   };
 
   const renderManageBaseV136=renderManajemenAkunV65;
@@ -9967,3 +9986,66 @@ saveSuratV133=async function(submit){
   showLoading(submit?'Menandatangani dan mengajukan Nota Dinas...':'Menyimpan draft Nota Dinas...');
   try{if(file){data.file_name=file.name;data.mime_type=file.type;data.file_base64=await fileToBase64(file);}const r=await apiPost({action:'saveSuratV133',user:currentUser,data});if(!r.success)throw new Error(r.message||'Gagal menyimpan surat');suratEditIdV133='';sessionStorage.removeItem(suratCacheKeyV133());await loadSuratWorkspaceV133(true);suratTabV133='BUAT';renderSuratV133();setTimeout(()=>document.getElementById('suratSayaPanelV134')?.scrollIntoView({behavior:'smooth',block:'start'}),80);alert(r.message||'Nota Dinas berhasil diproses');}catch(e){alert(e.message||String(e));}finally{hideLoading();}
 };
+
+
+/* =========================================================
+   SIMPROV v137 - HPS modal foreground, lampiran surat aman,
+   hapus surat belum selesai, dan panel admin dapat diminimalkan.
+   ========================================================= */
+(function(){
+  window.lihatLampiranSuratV137=async function(id){
+    const w=window.open('','_blank');
+    if(!w){alert('Popup diblokir browser. Izinkan popup untuk melihat lampiran.');return;}
+    w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Memuat lampiran...</title><style>body{font-family:Arial,sans-serif;display:grid;place-items:center;min-height:90vh;color:#174f75}</style></head><body>Memuat lampiran melalui SIMPROV...</body></html>');w.document.close();
+    try{
+      const r=await apiPost({action:'getSuratLampiranV137',user:currentUser,id_surat:id});
+      if(!r?.success||!r.base64)throw new Error(r?.message||'Lampiran tidak dapat dimuat');
+      const dataUrl=`data:${r.mime_type||'application/octet-stream'};base64,${r.base64}`;
+      const mime=String(r.mime_type||'').toLowerCase(),name=esc(r.file_name||'Lampiran');
+      if(mime==='application/pdf'){
+        w.document.open();w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${name}</title><style>*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif}.bar{height:58px;display:flex;justify-content:space-between;align-items:center;padding:10px 16px;background:#eef8ff;color:#174f75}.bar a,.bar button{padding:9px 13px;border:1px solid #bcd8ea;border-radius:9px;background:#fff;color:#14517d;font-weight:700;text-decoration:none}iframe{width:100%;height:calc(100vh - 58px);border:0}</style></head><body><div class="bar"><b>${name}</b><div><a download="${name}" href="${dataUrl}">Unduh</a> <button onclick="window.close()">Tutup</button></div></div><iframe src="${dataUrl}"></iframe></body></html>`);w.document.close();
+      }else if(mime.startsWith('image/')){
+        w.document.open();w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${name}</title><style>body{margin:0;background:#eef3f7;text-align:center;font-family:Arial}.bar{padding:12px;background:#fff}.bar a{color:#14517d;font-weight:700}img{max-width:96vw;margin:18px auto;background:#fff;box-shadow:0 8px 30px #0002}</style></head><body><div class="bar"><a download="${name}" href="${dataUrl}">Unduh ${name}</a></div><img src="${dataUrl}" alt="${name}"></body></html>`);w.document.close();
+      }else{
+        w.location.href=dataUrl;
+      }
+    }catch(e){w.document.open();w.document.write(`<p style="font-family:Arial;padding:24px;color:#a33">${esc(e.message||String(e))}</p>`);w.document.close();}
+  };
+
+  const suratActionsBaseV137=suratActionButtonsV133;
+  suratActionButtonsV133=function(s){
+    let html=suratActionsBaseV137(s)||'';
+    const own=String(s?.asal_id_user||'')===String(currentUser?.id_user||''),status=String(s?.status_surat||'DRAFT').toUpperCase();
+    if(own&&status!=='SELESAI')html+=`<button type="button" class="btn-danger" onclick="hapusSuratV137('${esc(s.id_surat)}')">Hapus Surat</button>`;
+    return html;
+  };
+
+  window.hapusSuratV137=async function(id){
+    const s=(suratWorkspaceV133?.surat||[]).find(x=>String(x.id_surat)===String(id));if(!s)return;
+    const ok=await confirmActionV133({title:'Hapus Nota Dinas',message:`Apakah Anda yakin ingin menghapus Nota Dinas “${s.perihal||s.nomor_surat||''}”? Surat dan lampirannya akan dihapus dan tidak dapat dikembalikan.`,confirmText:'Ya, Hapus Surat',danger:true});if(!ok)return;
+    showLoading('Menghapus Nota Dinas...');
+    try{
+      const r=await apiPost({action:'deleteSuratV137',user:currentUser,id_surat:id});if(!r.success)throw new Error(r.message||'Gagal menghapus surat');
+      suratWorkspaceV133.surat=(suratWorkspaceV133.surat||[]).filter(x=>String(x.id_surat)!==String(id));writeSuratCacheV133(suratWorkspaceV133);renderSuratV133();alert(r.message||'Nota Dinas berhasil dihapus');
+    }catch(e){alert(e.message||String(e));}finally{hideLoading();}
+  };
+
+  window.toggleManagementPanelV137=function(btn){
+    const panel=btn?.closest?.('.management-collapsible-v137');if(!panel)return;
+    const collapsed=panel.classList.toggle('is-collapsed-v137');btn.textContent=collapsed?'Tampilkan':'Minimize';btn.setAttribute('aria-expanded',String(!collapsed));
+  };
+  function setupManagementPanelsV137(){
+    if(!isSuperAdminV65())return;
+    const area=document.getElementById('contentArea');if(!area)return;
+    [...area.querySelectorAll(':scope > section.panel')].forEach(panel=>{
+      const title=String(panel.querySelector('h3')?.textContent||'').trim(),keepOpen=title.toUpperCase().includes('MANAJEMEN AKSES DAN AKUN');
+      let header=panel.querySelector(':scope > .panel-title-row, :scope > .panel-head');
+      if(!header)return;
+      panel.classList.add('management-collapsible-v137');header.classList.add('management-header-v137');
+      if(!header.querySelector('.management-toggle-v137'))header.insertAdjacentHTML('beforeend',`<button type="button" class="btn-soft management-toggle-v137" aria-expanded="${keepOpen?'true':'false'}" onclick="toggleManagementPanelV137(this)">${keepOpen?'Minimize':'Tampilkan'}</button>`);
+      panel.classList.toggle('is-collapsed-v137',!keepOpen);
+    });
+  }
+  const renderManageBaseV137=renderManajemenAkunV65;
+  renderManajemenAkunV65=function(){renderManageBaseV137();setupManagementPanelsV137();};
+})();
